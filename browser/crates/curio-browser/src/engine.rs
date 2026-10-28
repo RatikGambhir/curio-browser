@@ -36,6 +36,9 @@ pub struct EngineConfig {
     pub download_dir: Option<PathBuf>,
     /// Allow the Web Inspector.
     pub devtools: bool,
+    /// Corner radius of the page, in points, so it matches the card it sits
+    /// in. The native view is drawn outside GPUI, so GPUI cannot clip it.
+    pub corner_radius: f64,
     bridge: String,
 }
 
@@ -50,6 +53,7 @@ impl EngineConfig {
             forwarded_keys,
             download_dir,
             devtools: true,
+            corner_radius: 0.0,
             bridge,
         }
     }

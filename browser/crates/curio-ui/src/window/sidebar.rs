@@ -770,20 +770,25 @@ impl BrowserWindow {
                 let is_active = id == active;
                 let name = SharedString::from(space.name.clone());
                 let this = menu.this.clone();
+                // Like Arc: one dot per space in the color picked for it; the
+                // active space's dot is larger and solid.
+                let dot = px(if is_active { 8. } else { 6. });
                 div()
                     .id(SharedString::from(format!("space-{id}")))
-                    .size(px(28.))
-                    .rounded(px(8.))
+                    .w(px(18.))
+                    .h(px(28.))
+                    .rounded(px(6.))
                     .flex()
                     .items_center()
                     .justify_center()
-                    .text_size(px(14.))
                     .cursor_pointer()
-                    .when(is_active, |el| el.bg(theme.row_active).shadow_xs())
-                    .when(!is_active, |el| {
-                        el.opacity(0.7).hover(|s| s.bg(theme.row_hover).opacity(1.))
-                    })
-                    .child(SharedString::from(space.icon.clone()))
+                    .when(!is_active, |el| el.opacity(0.5).hover(|s| s.opacity(1.)))
+                    .child(
+                        div()
+                            .size(dot)
+                            .rounded_full()
+                            .bg(CurioTheme::swatch(space.color)),
+                    )
                     .tooltip(move |w, cx| Tooltip::new(name.clone()).build(w, cx))
                     .on_click(
                         cx.listener(move |this, _, window, cx| this.switch_space(id, window, cx)),
@@ -814,7 +819,7 @@ impl BrowserWindow {
             .border_t_1()
             .border_color(theme.divider)
             .child(
-                chrome_button("downloads", IconName::ArrowDown, cx)
+                chrome_button("downloads", IconName::ArrowRight, cx)
                     .when(downloads_active, |el| el.text_color(theme.accent_text))
                     .tooltip(|w, cx| Tooltip::new("Downloads").build(w, cx))
                     .on_click(|_, window, cx| {

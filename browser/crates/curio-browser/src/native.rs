@@ -1,5 +1,5 @@
 //! Engine calls that wry does not expose: back/forward state, native history
-//! navigation and stopping a load.
+//! navigation, stopping a load and rounding the page's corners.
 //!
 //! On macOS these go straight to `WKWebView`. On Linux (used only to develop
 //! and test Curio) they go to WebKitGTK.
@@ -52,6 +52,15 @@ mod imp {
         // SAFETY: as above.
         unsafe { view.hasOnlySecureContent() }
     }
+
+    pub fn set_corner_radius(webview: &wry::WebView, radius: f64) {
+        let view = webview.webview();
+        view.setWantsLayer(true);
+        if let Some(layer) = view.layer() {
+            layer.setCornerRadius(radius);
+            layer.setMasksToBounds(radius > 0.0);
+        }
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -83,6 +92,9 @@ mod imp {
     pub fn is_secure(webview: &wry::WebView) -> bool {
         webview.url().is_ok_and(|url| url.starts_with("https:"))
     }
+
+    /// WebKitGTK is only used for development; pages keep square corners.
+    pub fn set_corner_radius(_: &wry::WebView, _: f64) {}
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
@@ -111,6 +123,8 @@ mod imp {
     pub fn is_secure(webview: &wry::WebView) -> bool {
         webview.url().is_ok_and(|url| url.starts_with("https:"))
     }
+
+    pub fn set_corner_radius(_: &wry::WebView, _: f64) {}
 }
 
-pub use imp::{go_back, go_forward, history_state, is_secure, stop};
+pub use imp::{go_back, go_forward, history_state, is_secure, set_corner_radius, stop};

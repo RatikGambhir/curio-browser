@@ -103,10 +103,14 @@ impl BrowserWindow {
         let download_dir = Some(settings.browsing.download_dir.trim())
             .filter(|d| !d.is_empty())
             .map(std::path::PathBuf::from);
-        let engine = Rc::new(EngineConfig::new(
+        let mut engine = EngineConfig::new(
             actions::forwarded_keystrokes(&settings.keybindings),
             download_dir,
-        ));
+        );
+        // The page sits inside the card's 1px border, so its corners are
+        // concentric with the card's.
+        engine.corner_radius = f64::from(f32::from(metrics::CARD_RADIUS) - 1.0);
+        let engine = Rc::new(engine);
 
         let command_bar = cx.new(|cx| CommandBar::new(window, cx));
         let ai_panel = cx.new(|cx| AiPanel::new(window, cx));

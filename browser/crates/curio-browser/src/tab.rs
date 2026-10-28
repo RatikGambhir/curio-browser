@@ -294,6 +294,7 @@ impl BrowserTab {
                 return;
             }
         };
+        native::set_corner_radius(webview.raw(), self.engine.corner_radius);
         let visible = self.active;
         let webview = cx.new(|_| webview);
         webview.update(cx, |view, _| {

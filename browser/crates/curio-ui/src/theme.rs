@@ -64,7 +64,7 @@ impl Global for CurioTheme {}
 pub mod metrics {
     use gpui_kit::{Pixels, px};
 
-    pub const CARD_RADIUS: Pixels = px(10.);
+    pub const CARD_RADIUS: Pixels = px(12.);
     pub const ROW_RADIUS: Pixels = px(8.);
     pub const ROW_HEIGHT: Pixels = px(34.);
     pub const FIELD_RADIUS: Pixels = px(9.);
@@ -129,8 +129,8 @@ impl CurioTheme {
                 chrome_top: hsla(h, 0.55 * tint, 0.905, 1.0),
                 chrome_bottom: hsla((h + 0.03).rem_euclid(1.0), 0.48 * tint, 0.855, 1.0),
                 text: hsla(h, 0.12 * tint, 0.13, 1.0),
-                text_muted: hsla(h, 0.10 * tint, 0.13, 0.62),
-                text_faint: hsla(h, 0.10 * tint, 0.13, 0.40),
+                text_muted: hsla(h, 0.10 * tint, 0.13, 0.80),
+                text_faint: hsla(h, 0.10 * tint, 0.13, 0.55),
                 row_hover: hsla(0.0, 0.0, 1.0, 0.38),
                 row_active: hsla(0.0, 0.0, 1.0, 0.86),
                 row_active_text: hsla(h, 0.15 * tint, 0.10, 1.0),
@@ -160,8 +160,8 @@ impl CurioTheme {
                 chrome_top: hsla(h, 0.24 * tint, 0.155, 1.0),
                 chrome_bottom: hsla((h + 0.03).rem_euclid(1.0), 0.20 * tint, 0.115, 1.0),
                 text: hsla(h, 0.10 * tint, 0.93, 1.0),
-                text_muted: hsla(h, 0.08 * tint, 0.93, 0.62),
-                text_faint: hsla(h, 0.08 * tint, 0.93, 0.38),
+                text_muted: hsla(h, 0.08 * tint, 0.93, 0.78),
+                text_faint: hsla(h, 0.08 * tint, 0.93, 0.52),
                 row_hover: hsla(0.0, 0.0, 1.0, 0.06),
                 row_active: hsla(0.0, 0.0, 1.0, 0.13),
                 row_active_text: hsla(0.0, 0.0, 1.0, 1.0),
