@@ -330,10 +330,10 @@ impl BrowserWindow {
             .len()
             .saturating_sub(browsing.max_live_tabs.saturating_sub(1));
         for (index, (id, last)) in awake.iter().enumerate() {
-            if index < excess || last.elapsed() > idle_limit {
-                if let Some(entity) = self.tabs.get(id) {
-                    entity.update(cx, |tab, cx| tab.sleep(cx));
-                }
+            if (index < excess || last.elapsed() > idle_limit)
+                && let Some(entity) = self.tabs.get(id)
+            {
+                entity.update(cx, |tab, cx| tab.sleep(cx));
             }
         }
     }
@@ -354,6 +354,7 @@ impl BrowserWindow {
                 };
                 let state = entity.read(cx).state().clone();
                 let mut changed = false;
+                let mut title_changed = None;
                 if let Some(tab) = self.workspace.tab_mut(id) {
                     if !state.url.is_empty() && tab.url != state.url {
                         tab.url.clone_from(&state.url);
@@ -362,11 +363,15 @@ impl BrowserWindow {
                     if !state.title.is_empty() && tab.title != state.title {
                         tab.title.clone_from(&state.title);
                         changed = true;
+                        title_changed = Some((tab.url.clone(), tab.title.clone()));
                     }
                     if state.favicon.is_some() && tab.favicon_url != state.favicon {
                         tab.favicon_url.clone_from(&state.favicon);
                         changed = true;
                     }
+                }
+                if let Some((url, title)) = title_changed {
+                    self.update_visit_title(url, title, cx);
                 }
                 if changed {
                     self.schedule_save(cx);
@@ -382,18 +387,10 @@ impl BrowserWindow {
                 }
                 cx.notify();
             }
-            BrowserTabEvent::Navigated { url } => self.record_visit(url, id, cx),
+            BrowserTabEvent::Navigated { url } => self.record_visit(url, cx),
             BrowserTabEvent::LoadFinished { url, title } => {
-                if settings(cx).browsing.save_history
-                    && !title.is_empty()
-                    && url.starts_with("http")
-                {
-                    let storage = Services::get(cx).storage.clone();
-                    let (url, title) = (url.clone(), title.clone());
-                    cx.background_spawn(async move {
-                        let _ = storage.with(|db| db.update_history_title(&url, &title));
-                    })
-                    .detach();
+                if !title.is_empty() {
+                    self.update_visit_title(url.clone(), title.clone(), cx);
                 }
             }
             BrowserTabEvent::OpenInNewTab { url, background } => {
@@ -476,20 +473,31 @@ impl BrowserWindow {
         }
     }
 
-    fn record_visit(&mut self, url: &str, id: TabId, cx: &mut Context<Self>) {
+    fn record_visit(&mut self, url: &str, cx: &mut Context<Self>) {
         if !settings(cx).browsing.save_history || !url.starts_with("http") {
             return;
         }
-        let title = self
-            .workspace
-            .tab(id)
-            .map(|t| t.title.clone())
-            .unwrap_or_default();
+        // The tab's title may still belong to the previous page; the real
+        // title is filled in when the page reports it.
+        let title = String::new();
         let storage = Services::get(cx).storage.clone();
         let url = url.to_owned();
         cx.background_spawn(async move {
             if let Err(error) = storage.with(|db| db.record_visit(&url, &title)) {
                 tracing::warn!(%error, "could not record history");
+            }
+        })
+        .detach();
+    }
+
+    fn update_visit_title(&self, url: String, title: String, cx: &mut Context<Self>) {
+        if !settings(cx).browsing.save_history || !url.starts_with("http") {
+            return;
+        }
+        let storage = Services::get(cx).storage.clone();
+        cx.background_spawn(async move {
+            if let Err(error) = storage.with(|db| db.update_history_title(&url, &title)) {
+                tracing::warn!(%error, "could not update history title");
             }
         })
         .detach();
@@ -594,10 +602,8 @@ impl BrowserWindow {
             .active_tab_entity()
             .is_none_or(|t| !t.read(cx).is_awake())
         {
-            tracing::debug!("find: no loaded page");
             return;
         }
-        tracing::debug!("find: opening");
         self.find.open = true;
         let handle = self.find.input.read(cx).focus_handle(cx);
         if let Some(tab) = self.active_tab_entity() {

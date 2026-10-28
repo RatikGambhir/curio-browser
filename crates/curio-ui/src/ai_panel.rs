@@ -307,6 +307,7 @@ impl AiPanel {
             .map(|t| ContextRef {
                 title: t.title.clone(),
                 url: t.url.clone(),
+                favicon_url: t.favicon.clone(),
             })
             .collect();
         self.conversation.scope = match (self.attach_space, tabs.as_slice()) {
@@ -795,7 +796,11 @@ impl AiPanel {
                                     .bg(theme.row_hover)
                                     .text_xs()
                                     .text_color(theme.text_faint)
-                                    .child(favicon(None, &display_host(&c.url), px(12.)))
+                                    .child(favicon(
+                                        c.favicon_url.as_deref(),
+                                        &display_host(&c.url),
+                                        px(12.),
+                                    ))
                                     .child(
                                         div()
                                             .max_w(px(140.))

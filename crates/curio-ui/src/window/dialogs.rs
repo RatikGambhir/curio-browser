@@ -458,7 +458,7 @@ impl BrowserWindow {
             dialog
                 .title("Settings")
                 .w(px(760.))
-                .child(div().h(px(520.)).child(view.clone()))
+                .child(div().w_full().h(px(520.)).child(view.clone()))
         });
     }
 

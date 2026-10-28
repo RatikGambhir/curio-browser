@@ -159,7 +159,7 @@ pub fn classify_input(input: &str, engine: &SearchEngine) -> Option<Navigation> 
     let is_domain = host.contains('.')
         && !host.starts_with('.')
         && !host.ends_with('.')
-        && host.split('.').last().is_some_and(|tld| {
+        && host.rsplit('.').next().is_some_and(|tld| {
             tld.len() >= 2 && tld.chars().all(|c| c.is_ascii_alphabetic() || c == '-')
         })
         && host

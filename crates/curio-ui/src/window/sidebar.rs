@@ -247,22 +247,16 @@ impl BrowserWindow {
             .overflow_hidden()
             .on_click(|_, window, cx| window.dispatch_action(Box::new(actions::EditUrl), cx))
             .child(
-                div()
-                    .text_color(if is_page {
-                        theme.text_faint
+                div().text_color(theme.text_faint).child(
+                    Icon::new(if !is_page {
+                        IconName::Search
+                    } else if secure {
+                        IconName::Lock
                     } else {
-                        theme.text_faint
+                        IconName::Globe
                     })
-                    .child(
-                        Icon::new(if !is_page {
-                            IconName::Search
-                        } else if secure {
-                            IconName::Lock
-                        } else {
-                            IconName::Globe
-                        })
-                        .xsmall(),
-                    ),
+                    .xsmall(),
+                ),
             )
             .child(
                 div()
@@ -333,7 +327,6 @@ impl BrowserWindow {
         let theme = *CurioTheme::get(cx);
         let favorites = self.workspace.favorites().to_vec();
         let active = self.workspace.active_tab_id();
-        let drop_hint = favorites.is_empty();
         let tiles: Vec<AnyElement> = favorites
             .iter()
             .map(|favorite| {
@@ -408,10 +401,6 @@ impl BrowserWindow {
             .when(!tiles.is_empty(), |el| {
                 el.child(h_flex().flex_wrap().gap(px(6.)).children(tiles))
             })
-            .when(
-                drop_hint && self.workspace.active_space().strip.len() > 0,
-                |el| el,
-            )
             .into_any_element()
     }
 

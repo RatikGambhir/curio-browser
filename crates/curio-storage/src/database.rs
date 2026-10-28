@@ -459,15 +459,37 @@ impl Database {
 
     // ----- History ------------------------------------------------------
 
-    /// Records a visit.
+    /// Records a visit. A repeat of the most recent visit (a reload, or a
+    /// restored tab) only refreshes its timestamp.
     ///
     /// # Errors
     /// Fails on SQLite errors.
     pub fn record_visit(&self, url: &str, title: &str) -> Result<()> {
-        self.conn.execute(
-            "INSERT INTO history (url, title, visited_at) VALUES (?1, ?2, ?3)",
-            params![url, title, now_ms()],
-        )?;
+        let now = now_ms();
+        let latest: Option<(i64, String)> = self
+            .conn
+            .query_row(
+                "SELECT id, url FROM history ORDER BY visited_at DESC, id DESC LIMIT 1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        match latest {
+            Some((id, latest_url)) if latest_url == url => {
+                self.conn.execute(
+                    "UPDATE history SET visited_at = ?2,
+                         title = CASE WHEN ?3 = '' THEN title ELSE ?3 END
+                     WHERE id = ?1",
+                    params![id, now, title],
+                )?;
+            }
+            _ => {
+                self.conn.execute(
+                    "INSERT INTO history (url, title, visited_at) VALUES (?1, ?2, ?3)",
+                    params![url, title, now],
+                )?;
+            }
+        }
         Ok(())
     }
 
@@ -519,7 +541,10 @@ impl Database {
     /// Fails on SQLite errors.
     pub fn recent_history(&self, limit: usize) -> Result<Vec<HistoryEntry>> {
         let mut stmt = self.conn.prepare(
-            "SELECT url, title, 1, visited_at FROM history ORDER BY visited_at DESC LIMIT ?1",
+            // SQLite takes bare columns from the row holding MAX(), so the
+            // title is the latest one for each URL.
+            "SELECT url, title, COUNT(*), MAX(visited_at) AS last FROM history
+             GROUP BY url ORDER BY last DESC LIMIT ?1",
         )?;
         let rows = stmt.query_map([limit as i64], Self::history_row)?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
@@ -996,8 +1021,8 @@ mod tests {
         db.record_visit("https://gpui.rs/", "").expect("visit");
         db.update_history_title("https://gpui.rs/", "GPUI")
             .expect("title");
-        db.record_visit("https://gpui.rs/", "GPUI").expect("visit");
         db.record_visit("https://zed.dev/", "Zed").expect("visit");
+        db.record_visit("https://gpui.rs/", "GPUI").expect("visit");
         let results = db.search_history("gpui", 10).expect("search");
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].visit_count, 2);
@@ -1026,6 +1051,7 @@ mod tests {
         user.context.push(ContextRef {
             title: "GPUI".into(),
             url: "https://gpui.rs".into(),
+            favicon_url: None,
         });
         conv.messages.push(user);
         conv.messages
@@ -1084,5 +1110,26 @@ mod tests {
         let db = Database::open(&path).expect("reopen");
         let loaded = db.load_workspace().expect("load").expect("saved");
         assert_eq!(loaded.spaces(), ws.spaces());
+    }
+
+    #[test]
+    fn repeated_visits_collapse_and_history_lists_unique_urls() {
+        let db = Database::open_in_memory().expect("db");
+        db.record_visit("https://a.test/", "").expect("visit");
+        db.update_history_title("https://a.test/", "A")
+            .expect("title");
+        // A reload keeps the existing title.
+        db.record_visit("https://a.test/", "").expect("visit");
+        db.record_visit("https://b.test/", "B").expect("visit");
+        db.record_visit("https://a.test/", "").expect("visit");
+        let count: i64 = db
+            .conn
+            .query_row("SELECT COUNT(*) FROM history", [], |r| r.get(0))
+            .expect("count");
+        assert_eq!(count, 3);
+        let recent = db.recent_history(10).expect("recent");
+        let urls: Vec<_> = recent.iter().map(|e| e.url.as_str()).collect();
+        assert_eq!(urls, ["https://a.test/", "https://b.test/"]);
+        assert_eq!(recent[0].visit_count, 2);
     }
 }

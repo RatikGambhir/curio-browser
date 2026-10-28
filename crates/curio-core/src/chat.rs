@@ -29,6 +29,8 @@ impl Role {
 pub struct ContextRef {
     pub title: String,
     pub url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub favicon_url: Option<String>,
 }
 
 /// What browsing context a conversation is associated with, so the user can

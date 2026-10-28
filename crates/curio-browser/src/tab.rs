@@ -123,7 +123,17 @@ pub struct BrowserTab {
     restore_scroll: Option<f64>,
     last_active: Instant,
     load_started: Option<Instant>,
+    /// The page shown before the current navigation, so an aborted load (a
+    /// download, a cancelled request) can restore its title and icon.
+    committed: Option<Committed>,
     _events: Option<Task<()>>,
+}
+
+#[derive(Debug, Clone)]
+struct Committed {
+    url: String,
+    title: String,
+    favicon: Option<String>,
 }
 
 impl EventEmitter<BrowserTabEvent> for BrowserTab {}
@@ -155,6 +165,7 @@ impl BrowserTab {
             restore_scroll: (scroll_y > 0.0).then_some(scroll_y),
             last_active: Instant::now(),
             load_started: None,
+            committed: None,
             _events: None,
         }
     }
@@ -255,6 +266,12 @@ impl BrowserTab {
                 {
                     *path = crate::engine::unique_path(&dir.join(name));
                 }
+                // A missing folder would fail the download.
+                if let Some(parent) = path.parent()
+                    && let Err(error) = std::fs::create_dir_all(parent)
+                {
+                    tracing::warn!(%error, "could not create the download folder");
+                }
                 let _ = tx.try_send(RawEvent::DownloadStarted(
                     url,
                     path.to_string_lossy().into_owned(),
@@ -315,6 +332,16 @@ impl BrowserTab {
         }
     }
 
+    fn remember_committed(&mut self) {
+        if !self.state.url.is_empty() {
+            self.committed = Some(Committed {
+                url: self.state.url.clone(),
+                title: self.state.title.clone(),
+                favicon: self.state.favicon.clone(),
+            });
+        }
+    }
+
     fn handle_raw(&mut self, event: RawEvent, cx: &mut Context<Self>) {
         match event {
             RawEvent::Load(PageLoadEvent::Started, url) => {
@@ -323,6 +350,7 @@ impl BrowserTab {
                 self.state.selection = None;
                 self.load_started = Some(Instant::now());
                 if !url.is_empty() && url != self.state.url {
+                    self.remember_committed();
                     self.state.url = url;
                     self.state.favicon = None;
                     self.state.theme_color = None;
@@ -337,6 +365,17 @@ impl BrowserTab {
                 self.load_started = None;
                 if !url.is_empty() {
                     self.state.url = url.clone();
+                }
+                // The load was abandoned and the previous page is still shown.
+                if let Some(committed) = &self.committed
+                    && committed.url == self.state.url
+                {
+                    if self.state.title.is_empty() {
+                        self.state.title.clone_from(&committed.title);
+                    }
+                    if self.state.favicon.is_none() {
+                        self.state.favicon.clone_from(&committed.favicon);
+                    }
                 }
                 self.refresh_history(cx);
                 if let Some(y) = self.restore_scroll.take() {
@@ -479,9 +518,9 @@ impl BrowserTab {
             cx.emit(BrowserTabEvent::StateChanged);
             return;
         }
+        // The title and icon stay until the new page reports its own.
+        self.remember_committed();
         self.state.url = url.to_owned();
-        self.state.title.clear();
-        self.state.favicon = None;
         match &self.webview {
             Some(webview) => {
                 webview.update(cx, |view, _| view.load_url(url));

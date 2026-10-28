@@ -220,12 +220,21 @@ impl CurioTheme {
             theme.primary_hover = mix(tokens.accent, hsla(0., 0., 1., 1.), 0.08);
             theme.primary_active = mix(tokens.accent, hsla(0., 0., 0., 1.), 0.08);
             theme.primary_foreground = hsla(0., 0., 1., 1.);
+            theme.button_primary = theme.primary;
+            theme.button_primary_hover = theme.primary_hover;
+            theme.button_primary_active = theme.primary_active;
+            theme.button_primary_foreground = theme.primary_foreground;
             theme.ring = with_alpha(tokens.accent, 0.55);
             theme.caret = tokens.accent;
             theme.selection = with_alpha(tokens.accent, 0.28);
             theme.link = tokens.accent_text;
             theme.link_hover = tokens.accent;
             theme.popover = tokens.surface_raised;
+            // Dialogs and sheets sit on the background color; keep dark mode
+            // in Curio's tinted surface instead of near-black.
+            if appearance == Appearance::Dark {
+                theme.background = tokens.surface;
+            }
             theme.popover_foreground = tokens.text;
             theme.list_active = tokens.accent_soft;
             theme.list_active_border = with_alpha(tokens.accent, 0.0);

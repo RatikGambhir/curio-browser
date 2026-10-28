@@ -386,7 +386,7 @@ impl CommandBar {
             });
         }
 
-        let history_limit = if query.is_empty() { 6 } else { 6 };
+        let history_limit = 6;
         for entry in self
             .history
             .iter()
@@ -489,7 +489,7 @@ impl CommandBar {
                 } else {
                     theme.text_muted
                 })
-                .child(Icon::new(icon.clone()).small())
+                .child(Icon::new(*icon).small())
                 .into_any_element(),
             ItemIcon::Site(url, label) => div()
                 .size(px(26.))
