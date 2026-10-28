@@ -81,9 +81,7 @@ mod imp {
     }
 
     pub fn is_secure(webview: &wry::WebView) -> bool {
-        webview
-            .url()
-            .is_ok_and(|url| url.starts_with("https:"))
+        webview.url().is_ok_and(|url| url.starts_with("https:"))
     }
 }
 

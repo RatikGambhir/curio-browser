@@ -5,15 +5,15 @@ use std::time::Duration;
 
 use curio_ai::QuickAction;
 use curio_core::display_host;
+use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::Input;
 use gpui_kit::component::{Icon, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
-use gpui_kit::assets::IconName;
 use gpui_kit::{
-    Animation, AnimationExt as _, AnyElement, Context, FontWeight,
-    InteractiveElement as _, IntoElement, ParentElement as _, SharedString,
-    StatefulInteractiveElement as _, Styled as _, Window, deferred, div, img, px, relative,
+    Animation, AnimationExt as _, AnyElement, Context, FontWeight, InteractiveElement as _,
+    IntoElement, ParentElement as _, SharedString, StatefulInteractiveElement as _, Styled as _,
+    Window, deferred, div, img, px, relative,
 };
 
 use super::BrowserWindow;
@@ -22,7 +22,12 @@ use crate::components::{favicon, shortcut_hint};
 use crate::theme::{CurioTheme, metrics};
 
 impl BrowserWindow {
-    pub(crate) fn render_content(&mut self, card_top: bool, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    pub(crate) fn render_content(
+        &mut self,
+        card_top: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = *CurioTheme::get(cx);
         let active = self.workspace.active_tab().cloned();
         let entity = self.active_tab_entity().cloned();
@@ -72,7 +77,9 @@ impl BrowserWindow {
                             .bg(theme.accent)
                             .with_animation(
                                 "page-loading",
-                                Animation::new(Duration::from_millis(1100)).repeat().with_easing(gpui_kit::ease_in_out),
+                                Animation::new(Duration::from_millis(1100))
+                                    .repeat()
+                                    .with_easing(gpui_kit::ease_in_out),
                                 |el, t| el.ml(relative(-0.35 + 1.35 * t)),
                             ),
                     ),
@@ -93,18 +100,21 @@ impl BrowserWindow {
                     .border_color(theme.surface_border)
                     .shadow_lg()
                     .text_sm()
-                    .child(div().text_color(theme.warning).child(Icon::new(IconName::TriangleAlert).small()))
                     .child(
                         div()
-                            .flex_1()
-                            .text_color(theme.text)
-                            .child("This page didn’t finish loading. Check your connection or the address."),
+                            .text_color(theme.warning)
+                            .child(Icon::new(IconName::TriangleAlert).small()),
                     )
+                    .child(div().flex_1().text_color(theme.text).child(
+                        "This page didn’t finish loading. Check your connection or the address.",
+                    ))
                     .child(
                         Button::new("stalled-retry")
                             .small()
                             .label("Try Again")
-                            .on_click(|_, window, cx| window.dispatch_action(Box::new(actions::Reload), cx)),
+                            .on_click(|_, window, cx| {
+                                window.dispatch_action(Box::new(actions::Reload), cx)
+                            }),
                     ),
             ));
         }
@@ -145,12 +155,24 @@ impl BrowserWindow {
             .workspace
             .favorites()
             .iter()
-            .map(|f| (f.tab.url.clone(), f.tab.display_title(), f.tab.favicon_url.clone()))
-            .chain(
-                self.top_sites
-                    .iter()
-                    .map(|s| (s.url.clone(), if s.title.is_empty() { display_host(&s.url) } else { s.title.clone() }, None)),
-            )
+            .map(|f| {
+                (
+                    f.tab.url.clone(),
+                    f.tab.display_title(),
+                    f.tab.favicon_url.clone(),
+                )
+            })
+            .chain(self.top_sites.iter().map(|s| {
+                (
+                    s.url.clone(),
+                    if s.title.is_empty() {
+                        display_host(&s.url)
+                    } else {
+                        s.title.clone()
+                    },
+                    None,
+                )
+            }))
             .take(8)
             .enumerate()
             .map(|(i, (url, title, icon))| {
@@ -187,7 +209,9 @@ impl BrowserWindow {
                             .text_color(theme.text_muted)
                             .child(SharedString::from(title)),
                     )
-                    .on_click(cx.listener(move |this, _, window, cx| this.navigate_active(&url, window, cx)))
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.navigate_active(&url, window, cx)
+                    }))
                     .into_any_element()
             })
             .collect();
@@ -236,12 +260,26 @@ impl BrowserWindow {
                     .hover(|s| s.border_color(theme.accent))
                     .text_color(theme.text_faint)
                     .child(Icon::new(IconName::Search).small())
-                    .child(div().flex_1().text_size(px(15.)).child("Search the web, enter an address, or ask Curio"))
+                    .child(
+                        div()
+                            .flex_1()
+                            .text_size(px(15.))
+                            .child("Search the web, enter an address, or ask Curio"),
+                    )
                     .child(shortcut_hint("⌘T", cx))
-                    .on_click(|_, window, cx| window.dispatch_action(Box::new(actions::EditUrl), cx)),
+                    .on_click(|_, window, cx| {
+                        window.dispatch_action(Box::new(actions::EditUrl), cx)
+                    }),
             )
             .when(!tiles.is_empty(), |el| {
-                el.child(h_flex().flex_wrap().justify_center().gap(px(6.)).max_w(px(640.)).children(tiles))
+                el.child(
+                    h_flex()
+                        .flex_wrap()
+                        .justify_center()
+                        .gap(px(6.))
+                        .max_w(px(640.))
+                        .children(tiles),
+                )
             })
             .child(
                 h_flex()
@@ -252,7 +290,9 @@ impl BrowserWindow {
                             .small()
                             .icon(IconName::Sparkles)
                             .label("Ask Curio")
-                            .on_click(|_, window, cx| window.dispatch_action(Box::new(actions::ToggleAiPanel), cx)),
+                            .on_click(|_, window, cx| {
+                                window.dispatch_action(Box::new(actions::ToggleAiPanel), cx)
+                            }),
                     )
                     .child(
                         Button::new("ntp-history")
@@ -260,7 +300,9 @@ impl BrowserWindow {
                             .small()
                             .icon(IconName::CalendarClock)
                             .label("History")
-                            .on_click(|_, window, cx| window.dispatch_action(Box::new(actions::ShowHistory), cx)),
+                            .on_click(|_, window, cx| {
+                                window.dispatch_action(Box::new(actions::ShowHistory), cx)
+                            }),
                     ),
             )
             .into_any_element()
@@ -291,9 +333,26 @@ impl BrowserWindow {
             .border_1()
             .border_color(theme.surface_border)
             .shadow_lg()
-            .child(div().text_color(theme.text_faint).child(Icon::new(IconName::Search).small()))
-            .child(div().flex_1().child(Input::new(&self.find.input).appearance(false).small()))
-            .child(div().text_xs().text_color(if result.matches == 0 && !query_empty { theme.danger } else { theme.text_faint }).child(SharedString::from(status)))
+            .child(
+                div()
+                    .text_color(theme.text_faint)
+                    .child(Icon::new(IconName::Search).small()),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .child(Input::new(&self.find.input).appearance(false).small()),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(if result.matches == 0 && !query_empty {
+                        theme.danger
+                    } else {
+                        theme.text_faint
+                    })
+                    .child(SharedString::from(status)),
+            )
             .child(
                 Button::new("find-prev")
                     .ghost()
@@ -320,8 +379,18 @@ impl BrowserWindow {
     /// A floating bar of AI actions for the selected text.
     fn render_selection_actions(&self, text: &str, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = *CurioTheme::get(cx);
-        let preview: String = text.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(42).collect();
-        let action = |id: &'static str, icon: IconName, label: &'static str, quick: QuickAction, cx: &mut Context<Self>| {
+        let preview: String = text
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .chars()
+            .take(42)
+            .collect();
+        let action = |id: &'static str,
+                      icon: IconName,
+                      label: &'static str,
+                      quick: QuickAction,
+                      cx: &mut Context<Self>| {
             h_flex()
                 .id(id)
                 .h(px(28.))
@@ -362,17 +431,39 @@ impl BrowserWindow {
                             .max_w(px(200.))
                             .text_xs()
                             .text_color(theme.text_faint)
-                            .child(div().text_color(theme.accent_text).child(Icon::new(IconName::Sparkles).xsmall()))
-                            .child(div().truncate().child(SharedString::from(format!("“{preview}”")))),
+                            .child(
+                                div()
+                                    .text_color(theme.accent_text)
+                                    .child(Icon::new(IconName::Sparkles).xsmall()),
+                            )
+                            .child(
+                                div()
+                                    .truncate()
+                                    .child(SharedString::from(format!("“{preview}”"))),
+                            ),
                     )
                     .child(div().w(px(1.)).h(px(18.)).bg(theme.divider))
-                    .child(action("sel-explain", IconName::Lightbulb, "Explain", QuickAction::ExplainSelection, cx))
-                    .child(action("sel-summarize", IconName::FileText, "Summarize", QuickAction::SummarizeSelection, cx))
+                    .child(action(
+                        "sel-explain",
+                        IconName::Lightbulb,
+                        "Explain",
+                        QuickAction::ExplainSelection,
+                        cx,
+                    ))
+                    .child(action(
+                        "sel-summarize",
+                        IconName::FileText,
+                        "Summarize",
+                        QuickAction::SummarizeSelection,
+                        cx,
+                    ))
                     .child(action(
                         "sel-translate",
                         IconName::Languages,
                         "Translate",
-                        QuickAction::TranslateSelection { language: String::new() },
+                        QuickAction::TranslateSelection {
+                            language: String::new(),
+                        },
                         cx,
                     ))
                     .child(
@@ -389,7 +480,9 @@ impl BrowserWindow {
                             .hover(|s| s.bg(theme.accent_soft).text_color(theme.accent_text))
                             .child(Icon::new(IconName::MessageSquare).xsmall())
                             .child("Ask…")
-                            .on_click(cx.listener(|this, _, window, cx| this.send_selection_to_chat(window, cx))),
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.send_selection_to_chat(window, cx)
+                            })),
                     ),
             )
     }

@@ -3,17 +3,17 @@
 
 use curio_core::{GroupId, TabId};
 use curio_tabs::{GroupPlacement, Item, Placement, Section};
-use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem};
+use gpui_kit::AppContext as _;
+use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{Icon, Sizable as _, h_flex};
 use gpui_kit::prelude::FluentBuilder as _;
-use gpui_kit::assets::IconName;
-use gpui_kit::AppContext as _;
 use gpui_kit::{
-    AnyElement, ClickEvent, Context, FontWeight, InteractiveElement as _,
-    IntoElement, MouseButton, ParentElement as _, SharedString, StatefulInteractiveElement as _,
-    Styled as _, Window, div, px,
+    AnyElement, ClickEvent, Context, FontWeight, InteractiveElement as _, IntoElement, MouseButton,
+    ParentElement as _, SharedString, StatefulInteractiveElement as _, Styled as _, Window, div,
+    px,
 };
 
 use super::sidebar::space_menu;
@@ -23,7 +23,12 @@ use crate::components::{chrome_button, favicon};
 use crate::theme::{CurioTheme, metrics};
 
 impl BrowserWindow {
-    pub(crate) fn render_toolbar(&mut self, horizontal: bool, _: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    pub(crate) fn render_toolbar(
+        &mut self,
+        horizontal: bool,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = *CurioTheme::get(cx);
         let state = self.active_tab_entity().map(|t| t.read(cx).state().clone());
         let can_back = state.as_ref().is_some_and(|s| s.history.can_go_back);
@@ -52,12 +57,22 @@ impl BrowserWindow {
                     window.start_window_move();
                 }
             })
-            .child(div().w(metrics::TRAFFIC_LIGHTS_WIDTH - px(10.)).flex_shrink_0())
+            .child(
+                div()
+                    .w(metrics::TRAFFIC_LIGHTS_WIDTH - px(10.))
+                    .flex_shrink_0(),
+            )
             .when(!horizontal, |el| {
                 el.child(
                     chrome_button("toolbar-sidebar", IconName::PanelLeft, cx)
-                        .tooltip(|w, cx| Tooltip::new("Show Sidebar").action(&actions::ToggleSidebar, None).build(w, cx))
-                        .on_click(|_, window, cx| window.dispatch_action(Box::new(actions::ToggleSidebar), cx)),
+                        .tooltip(|w, cx| {
+                            Tooltip::new("Show Sidebar")
+                                .action(&actions::ToggleSidebar, None)
+                                .build(w, cx)
+                        })
+                        .on_click(|_, window, cx| {
+                            window.dispatch_action(Box::new(actions::ToggleSidebar), cx)
+                        }),
                 )
             })
             .when(horizontal, |el| {
@@ -75,14 +90,18 @@ impl BrowserWindow {
                                     PopupMenuItem::new(SharedString::from(label.clone()))
                                         .checked(id == active_space)
                                         .on_click(move |_, window, cx| {
-                                            let _ = this.update(cx, |this, cx| this.switch_space(id, window, cx));
+                                            let _ = this.update(cx, |this, cx| {
+                                                this.switch_space(id, window, cx)
+                                            });
                                         }),
                                 );
                             }
                             menu.separator().item(
                                 PopupMenuItem::new("New Space…")
                                     .icon(IconName::Plus)
-                                    .on_click(|_, window, cx| window.dispatch_action(Box::new(actions::NewSpace), cx)),
+                                    .on_click(|_, window, cx| {
+                                        window.dispatch_action(Box::new(actions::NewSpace), cx)
+                                    }),
                             )
                         }),
                 )
@@ -90,44 +109,83 @@ impl BrowserWindow {
             .child(
                 chrome_button("tb-back", IconName::ArrowLeft, cx)
                     .when(!can_back, |el| el.opacity(0.35))
-                    .tooltip(|w, cx| Tooltip::new("Back").action(&actions::GoBack, None).build(w, cx))
-                    .on_click(|_, window, cx| window.dispatch_action(Box::new(actions::GoBack), cx)),
+                    .tooltip(|w, cx| {
+                        Tooltip::new("Back")
+                            .action(&actions::GoBack, None)
+                            .build(w, cx)
+                    })
+                    .on_click(|_, window, cx| {
+                        window.dispatch_action(Box::new(actions::GoBack), cx)
+                    }),
             )
             .child(
                 chrome_button("tb-forward", IconName::ArrowRight, cx)
                     .when(!can_forward, |el| el.opacity(0.35))
-                    .tooltip(|w, cx| Tooltip::new("Forward").action(&actions::GoForward, None).build(w, cx))
-                    .on_click(|_, window, cx| window.dispatch_action(Box::new(actions::GoForward), cx)),
+                    .tooltip(|w, cx| {
+                        Tooltip::new("Forward")
+                            .action(&actions::GoForward, None)
+                            .build(w, cx)
+                    })
+                    .on_click(|_, window, cx| {
+                        window.dispatch_action(Box::new(actions::GoForward), cx)
+                    }),
             )
             .child(if loading {
-                chrome_button("tb-stop", IconName::X, cx)
-                    .on_click(|_, window, cx| window.dispatch_action(Box::new(actions::StopLoading), cx))
+                chrome_button("tb-stop", IconName::X, cx).on_click(|_, window, cx| {
+                    window.dispatch_action(Box::new(actions::StopLoading), cx)
+                })
             } else {
                 chrome_button("tb-reload", IconName::RotateCw, cx)
-                    .tooltip(|w, cx| Tooltip::new("Reload").action(&actions::Reload, None).build(w, cx))
+                    .tooltip(|w, cx| {
+                        Tooltip::new("Reload")
+                            .action(&actions::Reload, None)
+                            .build(w, cx)
+                    })
                     .on_click(|_, window, cx| window.dispatch_action(Box::new(actions::Reload), cx))
             })
-            .child(div().flex_1().max_w(px(720.)).mx_auto().child(self.render_url_pill(cx)))
+            .child(
+                div()
+                    .flex_1()
+                    .max_w(px(720.))
+                    .mx_auto()
+                    .child(self.render_url_pill(cx)),
+            )
             .child(
                 chrome_button("tb-ai", IconName::Sparkles, cx)
-                    .when(self.ai_open, |el| el.text_color(theme.accent_text).bg(theme.row_hover))
-                    .tooltip(|w, cx| Tooltip::new("Curio Assistant").action(&actions::ToggleAiPanel, None).build(w, cx))
-                    .on_click(|_, window, cx| window.dispatch_action(Box::new(actions::ToggleAiPanel), cx)),
+                    .when(self.ai_open, |el| {
+                        el.text_color(theme.accent_text).bg(theme.row_hover)
+                    })
+                    .tooltip(|w, cx| {
+                        Tooltip::new("Curio Assistant")
+                            .action(&actions::ToggleAiPanel, None)
+                            .build(w, cx)
+                    })
+                    .on_click(|_, window, cx| {
+                        window.dispatch_action(Box::new(actions::ToggleAiPanel), cx)
+                    }),
             )
             .child(
                 chrome_button("tb-downloads", IconName::ArrowDown, cx)
                     .tooltip(|w, cx| Tooltip::new("Downloads").build(w, cx))
-                    .on_click(|_, window, cx| window.dispatch_action(Box::new(actions::ShowDownloads), cx)),
+                    .on_click(|_, window, cx| {
+                        window.dispatch_action(Box::new(actions::ShowDownloads), cx)
+                    }),
             )
             .child(
                 chrome_button("tb-settings", IconName::Settings, cx)
                     .tooltip(|w, cx| Tooltip::new("Settings").build(w, cx))
-                    .on_click(|_, window, cx| window.dispatch_action(Box::new(actions::OpenSettings), cx)),
+                    .on_click(|_, window, cx| {
+                        window.dispatch_action(Box::new(actions::OpenSettings), cx)
+                    }),
             )
             .into_any_element()
     }
 
-    pub(crate) fn render_tab_strip(&mut self, _: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    pub(crate) fn render_tab_strip(
+        &mut self,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = *CurioTheme::get(cx);
         let menu = self.menu_context(cx);
         let space = self.workspace.active_space();
@@ -140,23 +198,25 @@ impl BrowserWindow {
             .favorites()
             .iter()
             .map(|f| (f.tab.id, f.tab.favicon_url.clone(), f.tab.display_title()))
-            .chain(space.strip.items(Section::Pinned).iter().flat_map(|item| match item {
-                Item::Tab(id) => space
-                    .strip
-                    .tab(*id)
-                    .map(|t| vec![(t.id, t.favicon_url.clone(), t.display_title())])
-                    .unwrap_or_default(),
-                Item::Group(group) => space
-                    .strip
-                    .group(*group)
-                    .map(|g| {
-                        g.tabs
-                            .iter()
-                            .filter_map(|id| space.strip.tab(*id))
-                            .map(|t| (t.id, t.favicon_url.clone(), t.display_title()))
-                            .collect()
-                    })
-                    .unwrap_or_default(),
+            .chain(space.strip.items(Section::Pinned).iter().flat_map(|item| {
+                match item {
+                    Item::Tab(id) => space
+                        .strip
+                        .tab(*id)
+                        .map(|t| vec![(t.id, t.favicon_url.clone(), t.display_title())])
+                        .unwrap_or_default(),
+                    Item::Group(group) => space
+                        .strip
+                        .group(*group)
+                        .map(|g| {
+                            g.tabs
+                                .iter()
+                                .filter_map(|id| space.strip.tab(*id))
+                                .map(|t| (t.id, t.favicon_url.clone(), t.display_title()))
+                                .collect()
+                        })
+                        .unwrap_or_default(),
+                }
             }))
             .collect();
         for (id, icon, title) in compact {
@@ -176,12 +236,21 @@ impl BrowserWindow {
                     .when(!is_active, |el| el.hover(|s| s.bg(theme.row_hover)))
                     .child(favicon(icon.as_deref(), &title, px(16.)))
                     .tooltip(move |w, cx| Tooltip::new(tip.clone()).build(w, cx))
-                    .on_click(cx.listener(move |this, _, window, cx| this.activate_tab(id, window, cx)))
+                    .on_click(
+                        cx.listener(move |this, _, window, cx| this.activate_tab(id, window, cx)),
+                    )
                     .into_any_element(),
             );
         }
         if !children.is_empty() {
-            children.push(div().w(px(1.)).h(px(18.)).mx(px(4.)).bg(theme.divider).into_any_element());
+            children.push(
+                div()
+                    .w(px(1.))
+                    .h(px(18.))
+                    .mx(px(4.))
+                    .bg(theme.divider)
+                    .into_any_element(),
+            );
         }
 
         // Regular tabs, with groups as colored labels.
@@ -206,7 +275,11 @@ impl BrowserWindow {
         children.push(
             chrome_button("strip-new-tab", IconName::Plus, cx)
                 .flex_shrink_0()
-                .tooltip(|w, cx| Tooltip::new("New Tab").action(&actions::NewTab, None).build(w, cx))
+                .tooltip(|w, cx| {
+                    Tooltip::new("New Tab")
+                        .action(&actions::NewTab, None)
+                        .build(w, cx)
+                })
                 .on_click(|_, window, cx| window.dispatch_action(Box::new(actions::NewTab), cx))
                 .into_any_element(),
         );
@@ -230,7 +303,12 @@ impl BrowserWindow {
                     .min_w(px(24.))
                     .drag_over::<DraggedTab>(move |s, _, _, _| s.bg(theme.accent_soft))
                     .on_drop(cx.listener(|this, dragged: &DraggedTab, window, cx| {
-                        this.drop_tab(dragged.id, Placement::SectionEnd(Section::Unpinned), window, cx);
+                        this.drop_tab(
+                            dragged.id,
+                            Placement::SectionEnd(Section::Unpinned),
+                            window,
+                            cx,
+                        );
                     }))
                     .context_menu(move |menu, _, _| space_menu(menu, this.clone(), space_id)),
             )
@@ -266,7 +344,11 @@ impl BrowserWindow {
             .child(div().size(px(7.)).rounded_full().bg(color))
             .child(SharedString::from(group.name.clone()))
             .when(collapsed, |el| {
-                el.child(div().text_color(theme.text_faint).child(SharedString::from(group.tabs.len().to_string())))
+                el.child(
+                    div()
+                        .text_color(theme.text_faint)
+                        .child(SharedString::from(group.tabs.len().to_string())),
+                )
             })
             .on_click(cx.listener(move |this, _, _, cx| {
                 if let Some(space) = this.workspace.space_mut(space_id) {
@@ -298,7 +380,10 @@ impl BrowserWindow {
             return div().into_any_element();
         };
         let is_active = self.workspace.active_tab_id() == Some(id);
-        let loading = self.tabs.get(&id).is_some_and(|e| e.read(cx).state().loading);
+        let loading = self
+            .tabs
+            .get(&id)
+            .is_some_and(|e| e.read(cx).state().loading);
         let title = tab.display_title();
         let group_color = group
             .and_then(|g| self.workspace.active_space().strip.group(g))
@@ -324,14 +409,30 @@ impl BrowserWindow {
             .text_sm()
             .cursor_pointer()
             .when_some(group_color, |el, color| el.border_b_2().border_color(color))
-            .when(is_active, |el| el.bg(theme.row_active).text_color(theme.row_active_text).shadow_xs())
-            .when(!is_active, |el| el.text_color(theme.text_muted).hover(|s| s.bg(theme.row_hover)))
+            .when(is_active, |el| {
+                el.bg(theme.row_active)
+                    .text_color(theme.row_active_text)
+                    .shadow_xs()
+            })
+            .when(!is_active, |el| {
+                el.text_color(theme.text_muted)
+                    .hover(|s| s.bg(theme.row_hover))
+            })
             .child(if loading {
-                gpui_kit::component::spinner::Spinner::new().xsmall().color(theme.accent).into_any_element()
+                gpui_kit::component::spinner::Spinner::new()
+                    .xsmall()
+                    .color(theme.accent)
+                    .into_any_element()
             } else {
                 favicon(tab.favicon_url.as_deref(), &title, px(15.))
             })
-            .child(div().flex_1().min_w_0().truncate().child(SharedString::from(title)))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .child(SharedString::from(title)),
+            )
             .child(
                 div()
                     .id(SharedString::from(format!("hclose-{id}")))
@@ -372,23 +473,34 @@ impl BrowserWindow {
                     let close = this.clone();
                     let ask = this.clone();
                     popup
-                        .item(PopupMenuItem::new("Pin Tab").icon(IconName::Star).on_click(move |_, _, cx| {
-                            let _ = pin.update(cx, |this, cx| this.toggle_pin(id, cx));
-                        }))
-                        .item(PopupMenuItem::new("Add to Favorites").icon(IconName::Heart).on_click(
-                            move |_, window, cx| {
-                                let _ = fav.update(cx, |this, cx| this.add_favorite(id, window, cx));
+                        .item(PopupMenuItem::new("Pin Tab").icon(IconName::Star).on_click(
+                            move |_, _, cx| {
+                                let _ = pin.update(cx, |this, cx| this.toggle_pin(id, cx));
                             },
                         ))
-                        .item(PopupMenuItem::new("Ask Curio About This Tab").icon(IconName::Sparkles).on_click(
-                            move |_, window, cx| {
-                                let _ = ask.update(cx, |this, cx| this.attach_tab_to_ai(id, window, cx));
-                            },
-                        ))
+                        .item(
+                            PopupMenuItem::new("Add to Favorites")
+                                .icon(IconName::Heart)
+                                .on_click(move |_, window, cx| {
+                                    let _ = fav
+                                        .update(cx, |this, cx| this.add_favorite(id, window, cx));
+                                }),
+                        )
+                        .item(
+                            PopupMenuItem::new("Ask Curio About This Tab")
+                                .icon(IconName::Sparkles)
+                                .on_click(move |_, window, cx| {
+                                    let _ = ask.update(cx, |this, cx| {
+                                        this.attach_tab_to_ai(id, window, cx)
+                                    });
+                                }),
+                        )
                         .separator()
-                        .item(PopupMenuItem::new("Close Tab").icon(IconName::X).on_click(move |_, window, cx| {
-                            let _ = close.update(cx, |this, cx| this.close_tab(id, window, cx));
-                        }))
+                        .item(PopupMenuItem::new("Close Tab").icon(IconName::X).on_click(
+                            move |_, window, cx| {
+                                let _ = close.update(cx, |this, cx| this.close_tab(id, window, cx));
+                            },
+                        ))
                 }
             })
             .into_any_element()

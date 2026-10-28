@@ -1,7 +1,7 @@
 //! Small building blocks shared across Curio's views.
 
-use gpui_kit::component::{Icon, Sizable as _, h_flex};
 use gpui_kit::assets::IconName;
+use gpui_kit::component::{Icon, Sizable as _};
 use gpui_kit::{
     AnyElement, App, Div, FontWeight, Hsla, InteractiveElement as _, IntoElement,
     ParentElement as _, Pixels, SharedString, Stateful, StatefulInteractiveElement as _,
@@ -12,7 +12,9 @@ use crate::theme::CurioTheme;
 
 /// A deterministic soft color for a site's letter avatar.
 fn letter_color(seed: &str) -> Hsla {
-    let hash = seed.bytes().fold(0u32, |h, b| h.wrapping_mul(31).wrapping_add(u32::from(b)));
+    let hash = seed
+        .bytes()
+        .fold(0u32, |h, b| h.wrapping_mul(31).wrapping_add(u32::from(b)));
     gpui_kit::hsla((hash % 360) as f32 / 360.0, 0.55, 0.55, 1.0)
 }
 
@@ -86,16 +88,4 @@ pub fn shortcut_hint(text: &str, cx: &App) -> impl IntoElement {
         .text_xs()
         .text_color(theme.text_faint)
         .child(SharedString::from(text.to_owned()))
-}
-
-/// A small pill label.
-pub fn pill(text: impl Into<SharedString>, bg: Hsla, fg: Hsla) -> impl IntoElement {
-    h_flex()
-        .px(px(7.))
-        .h(px(20.))
-        .rounded_full()
-        .bg(bg)
-        .text_color(fg)
-        .text_xs()
-        .child(text.into())
 }

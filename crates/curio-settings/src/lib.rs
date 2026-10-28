@@ -281,7 +281,9 @@ mod tests {
         let mut settings = Settings::default();
         settings.browsing.search_engine = SearchEngine::Custom("https://s.test/?q=%s".into());
         settings.ai.provider = AiProviderKind::OpenAiCompatible;
-        settings.keybindings.insert("curio::NewTab".into(), "cmd-shift-t".into());
+        settings
+            .keybindings
+            .insert("curio::NewTab".into(), "cmd-shift-t".into());
         let back = Settings::from_json(&settings.to_json());
         assert_eq!(back, settings);
     }
@@ -289,7 +291,10 @@ mod tests {
     #[test]
     fn provider_overrides_fall_back_to_defaults() {
         let mut ai = AiSettings::default();
-        assert_eq!(ai.base_url(AiProviderKind::OpenAi), "https://api.openai.com/v1");
+        assert_eq!(
+            ai.base_url(AiProviderKind::OpenAi),
+            "https://api.openai.com/v1"
+        );
         ai.providers.insert(
             AiProviderKind::OpenAiCompatible,
             ProviderSettings {

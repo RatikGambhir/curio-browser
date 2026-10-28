@@ -64,21 +64,42 @@ pub enum BrowserTabEvent {
     /// URL, title, favicon, loading or history state changed.
     StateChanged,
     /// A navigation committed to a new URL (for history recording).
-    Navigated { url: String },
+    Navigated {
+        url: String,
+    },
     /// The page finished loading.
-    LoadFinished { url: String, title: String },
+    LoadFinished {
+        url: String,
+        title: String,
+    },
     /// The page asked to open a link in a new tab.
-    OpenInNewTab { url: String, background: bool },
+    OpenInNewTab {
+        url: String,
+        background: bool,
+    },
     /// The page tried to open a link with a non-web scheme (mailto:, an app).
-    ExternalScheme { url: String },
+    ExternalScheme {
+        url: String,
+    },
     /// A browser shortcut was pressed while the page had focus.
-    Shortcut { keystroke: String },
+    Shortcut {
+        keystroke: String,
+    },
     /// The selection changed.
     SelectionChanged,
     /// The page scrolled (debounced).
-    Scrolled { y: f64 },
-    DownloadStarted { url: String, path: String },
-    DownloadFinished { url: String, path: Option<String>, success: bool },
+    Scrolled {
+        y: f64,
+    },
+    DownloadStarted {
+        url: String,
+        path: String,
+    },
+    DownloadFinished {
+        url: String,
+        path: Option<String>,
+        success: bool,
+    },
 }
 
 /// Engine callbacks, forwarded through a channel.
@@ -280,13 +301,15 @@ impl BrowserTab {
     }
 
     fn with_raw<R>(&self, cx: &App, f: impl FnOnce(&wry::WebView) -> R) -> Option<R> {
-        self.webview.as_ref().map(|webview| f(webview.read(cx).raw()))
+        self.webview
+            .as_ref()
+            .map(|webview| f(webview.read(cx).raw()))
     }
 
     fn refresh_history(&mut self, cx: &App) {
-        if let Some((history, secure)) =
-            self.with_raw(cx, |raw| (native::history_state(raw), native::is_secure(raw)))
-        {
+        if let Some((history, secure)) = self.with_raw(cx, |raw| {
+            (native::history_state(raw), native::is_secure(raw))
+        }) {
             self.state.history = history;
             self.state.secure = secure;
         }
@@ -594,8 +617,14 @@ impl BrowserTab {
                 .and_then(|raw| decode_script_string(&raw).ok())
                 .and_then(|json| serde_json::from_str::<serde_json::Value>(&json).ok())
                 .map(|v| FindResult {
-                    matches: v["matches"].as_u64().and_then(|n| u32::try_from(n).ok()).unwrap_or(0),
-                    active: v["active"].as_u64().and_then(|n| u32::try_from(n).ok()).unwrap_or(0),
+                    matches: v["matches"]
+                        .as_u64()
+                        .and_then(|n| u32::try_from(n).ok())
+                        .unwrap_or(0),
+                    active: v["active"]
+                        .as_u64()
+                        .and_then(|n| u32::try_from(n).ok())
+                        .unwrap_or(0),
                 })
                 .unwrap_or_default()
         })
@@ -646,7 +675,10 @@ mod tests {
 
     #[test]
     fn decodes_json_string_results() {
-        assert_eq!(decode_script_string("\"{\\\"a\\\":1}\"").expect("ok"), "{\"a\":1}");
+        assert_eq!(
+            decode_script_string("\"{\\\"a\\\":1}\"").expect("ok"),
+            "{\"a\":1}"
+        );
         assert_eq!(decode_script_string("{\"a\":1}").expect("ok"), "{\"a\":1}");
     }
 }

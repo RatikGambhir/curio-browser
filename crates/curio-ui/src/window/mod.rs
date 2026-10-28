@@ -26,8 +26,8 @@ use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::{
     Animation, AnimationExt as _, AppContext as _, Context, Entity, FocusHandle, Focusable,
     InteractiveElement as _, IntoElement, MouseButton, MouseMoveEvent, MouseUpEvent,
-    ParentElement as _, Pixels, Render, StatefulInteractiveElement as _, Styled as _, Subscription, Task, Window, deferred, div,
-    linear_color_stop, linear_gradient, px,
+    ParentElement as _, Pixels, Render, StatefulInteractiveElement as _, Styled as _, Subscription,
+    Task, Window, deferred, div, linear_color_stop, linear_gradient, px,
 };
 
 use crate::ai_panel::{AiPanel, AiPanelEvent};
@@ -39,7 +39,7 @@ pub(crate) use drag::{DraggedGroup, DraggedTab};
 
 /// Which divider is being dragged.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Resize {
+pub(crate) enum Resize {
     Sidebar,
     AiPanel,
 }
@@ -83,7 +83,7 @@ pub struct BrowserWindow {
     pub(crate) space_direction: f32,
     previous_theme: CurioTheme,
     swipe_accumulator: f32,
-    save_task: Option<Task<()>>,
+    save_pending: bool,
     pub(crate) downloads: Vec<DownloadItem>,
     pub(crate) top_sites: Vec<HistoryEntry>,
     _subscriptions: Vec<Subscription>,
@@ -115,11 +115,15 @@ impl BrowserWindow {
         let mut subscriptions = vec![
             cx.subscribe_in(&command_bar, window, Self::on_command_bar_event),
             cx.subscribe_in(&ai_panel, window, Self::on_ai_panel_event),
-            cx.subscribe_in(&find_input, window, |this, _, event, window, cx| match event {
-                InputEvent::Change => this.run_find(true, window, cx),
-                InputEvent::PressEnter { shift, .. } => this.run_find(!*shift, window, cx),
-                _ => {}
-            }),
+            cx.subscribe_in(
+                &find_input,
+                window,
+                |this, _, event, window, cx| match event {
+                    InputEvent::Change => this.run_find(true, window, cx),
+                    InputEvent::PressEnter { shift, .. } => this.run_find(!*shift, window, cx),
+                    _ => {}
+                },
+            ),
             cx.observe_global_in::<crate::SettingsStore>(window, |this, window, cx| {
                 this.apply_theme(window, cx);
                 cx.notify();
@@ -131,6 +135,10 @@ impl BrowserWindow {
         subscriptions.push(cx.on_release(|this, cx| {
             this.save_now(cx);
         }));
+        subscriptions.push(cx.on_app_quit(|this, cx| {
+            this.save_now(cx);
+            async {}
+        }));
 
         let accent = workspace.active_space().color;
         let appearance = CurioTheme::resolve(settings.appearance.theme, window.appearance());
@@ -139,7 +147,9 @@ impl BrowserWindow {
 
         let maintenance = cx.spawn_in(window, async move |this, cx| {
             loop {
-                cx.background_executor().timer(Duration::from_secs(60)).await;
+                cx.background_executor()
+                    .timer(Duration::from_secs(60))
+                    .await;
                 if this
                     .update_in(cx, |this, _, cx| this.put_idle_tabs_to_sleep(cx))
                     .is_err()
@@ -173,7 +183,7 @@ impl BrowserWindow {
             space_direction: 0.0,
             previous_theme,
             swipe_accumulator: 0.0,
-            save_task: None,
+            save_pending: false,
             downloads: Vec::new(),
             top_sites: Vec::new(),
             _subscriptions: subscriptions,
@@ -181,7 +191,11 @@ impl BrowserWindow {
         };
         this.sync_active_tab(window, cx);
         this.load_top_sites(cx);
-        if this.workspace.active_tab().is_none_or(curio_core::Tab::is_new_tab_page) {
+        if this
+            .workspace
+            .active_tab()
+            .is_none_or(curio_core::Tab::is_new_tab_page)
+        {
             // An empty space opens on the command bar, like a fresh Arc window.
             this.open_command_bar(CommandMode::NewTab, window, cx);
         }
@@ -190,7 +204,9 @@ impl BrowserWindow {
 
     /// The live entity of the active tab.
     pub(crate) fn active_tab_entity(&self) -> Option<&Entity<BrowserTab>> {
-        self.workspace.active_tab_id().and_then(|id| self.tabs.get(&id))
+        self.workspace
+            .active_tab_id()
+            .and_then(|id| self.tabs.get(&id))
     }
 
     pub(crate) fn layout(&self, cx: &gpui_kit::App) -> TabLayout {
@@ -226,13 +242,16 @@ impl BrowserWindow {
 
     /// Saves the workspace after a short delay, coalescing bursts of changes.
     pub(crate) fn schedule_save(&mut self, cx: &mut Context<Self>) {
-        if self.save_task.is_some() {
+        if self.save_pending {
             return;
         }
-        self.save_task = Some(cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(Duration::from_millis(900)).await;
+        self.save_pending = true;
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(Duration::from_millis(900))
+                .await;
             let Ok((snapshot, storage)) = this.update(cx, |this, cx| {
-                this.save_task = None;
+                this.save_pending = false;
                 (this.workspace.clone(), Services::get(cx).storage.clone())
             }) else {
                 return;
@@ -243,12 +262,13 @@ impl BrowserWindow {
             if let Err(error) = result {
                 tracing::error!(%error, "could not save session");
             }
-        }));
+        })
+        .detach();
     }
 
     /// Saves the workspace synchronously (on quit).
     pub(crate) fn save_now(&mut self, cx: &mut gpui_kit::App) {
-        self.save_task = None;
+        self.save_pending = false;
         let storage = Services::get(cx).storage.clone();
         if let Err(error) = storage.with(|db| db.save_workspace(&self.workspace)) {
             tracing::error!(%error, "could not save session on exit");
@@ -258,7 +278,9 @@ impl BrowserWindow {
     fn load_top_sites(&mut self, cx: &mut Context<Self>) {
         let storage = Services::get(cx).storage.clone();
         let task = cx.background_spawn(async move {
-            storage.with(|db| db.search_history("", 24)).unwrap_or_default()
+            storage
+                .with(|db| db.search_history("", 24))
+                .unwrap_or_default()
         });
         cx.spawn(async move |this, cx| {
             let sites = task.await;
@@ -266,7 +288,9 @@ impl BrowserWindow {
                 let mut seen = std::collections::HashSet::new();
                 this.top_sites = sites
                     .into_iter()
-                    .filter(|s| s.url.starts_with("http") && seen.insert(curio_core::display_host(&s.url)))
+                    .filter(|s| {
+                        s.url.starts_with("http") && seen.insert(curio_core::display_host(&s.url))
+                    })
                     .take(8)
                     .collect();
                 cx.notify();
@@ -277,7 +301,12 @@ impl BrowserWindow {
 
     // ----- Overlays -------------------------------------------------------
 
-    pub(crate) fn open_command_bar(&mut self, mode: CommandMode, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn open_command_bar(
+        &mut self,
+        mode: CommandMode,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let text = match mode {
             CommandMode::EditUrl => self
                 .workspace
@@ -342,7 +371,9 @@ impl BrowserWindow {
                 self.ai_open = false;
                 cx.notify();
             }
-            AiPanelEvent::OpenSettings => self.open_settings(Some(crate::settings_view::Section::Ai), window, cx),
+            AiPanelEvent::OpenSettings => {
+                self.open_settings(Some(crate::settings_view::Section::Ai), window, cx)
+            }
             AiPanelEvent::OpenUrl(url) => {
                 if url.starts_with("http") {
                     self.open_url_in_new_tab(url, None, true, window, cx);
@@ -356,7 +387,12 @@ impl BrowserWindow {
 
     // ----- Resizing -------------------------------------------------------
 
-    fn on_root_mouse_move(&mut self, event: &MouseMoveEvent, window: &mut Window, cx: &mut Context<Self>) {
+    fn on_root_mouse_move(
+        &mut self,
+        event: &MouseMoveEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(resize) = self.resizing else {
             return;
         };
@@ -499,26 +535,24 @@ impl Render for BrowserWindow {
         }
         row = row.child(main);
         if self.ai_open {
-            row = row
-                .child(self.resize_handle(Resize::AiPanel, cx))
-                .child(
-                    div()
-                        .w(self.ai_width)
-                        .h_full()
-                        .flex_shrink_0()
-                        .py(metrics::PANEL_GAP)
-                        .pr(metrics::PANEL_GAP)
-                        .child(
-                            div()
-                                .size_full()
-                                .rounded(metrics::CARD_RADIUS)
-                                .overflow_hidden()
-                                .border_1()
-                                .border_color(theme.card_border)
-                                .shadow_md()
-                                .child(self.ai_panel.clone()),
-                        ),
-                );
+            row = row.child(self.resize_handle(Resize::AiPanel, cx)).child(
+                div()
+                    .w(self.ai_width)
+                    .h_full()
+                    .flex_shrink_0()
+                    .py(metrics::PANEL_GAP)
+                    .pr(metrics::PANEL_GAP)
+                    .child(
+                        div()
+                            .size_full()
+                            .rounded(metrics::CARD_RADIUS)
+                            .overflow_hidden()
+                            .border_1()
+                            .border_color(theme.card_border)
+                            .shadow_md()
+                            .child(self.ai_panel.clone()),
+                    ),
+            );
         }
 
         let transition = self.space_transition;
@@ -588,8 +622,12 @@ impl Render for BrowserWindow {
                             .child(self.command_bar.clone())
                             .with_animation(
                                 "command-bar-in",
-                                Animation::new(Duration::from_millis(if reduce_motion { 1 } else { 140 }))
-                                    .with_easing(gpui_kit::ease_out_quint()),
+                                Animation::new(Duration::from_millis(if reduce_motion {
+                                    1
+                                } else {
+                                    140
+                                }))
+                                .with_easing(gpui_kit::ease_out_quint()),
                                 |el, t| el.opacity(t).mt(px(-8. * (1. - t))),
                             ),
                     ),

@@ -361,7 +361,11 @@ impl TabStrip {
         match location.group {
             Some(group_id) => {
                 let group = &self.groups[&group_id];
-                match location.index.checked_sub(1).and_then(|i| group.tabs.get(i)) {
+                match location
+                    .index
+                    .checked_sub(1)
+                    .and_then(|i| group.tabs.get(i))
+                {
                     Some(prev) => Placement::AfterTab(*prev),
                     None => Placement::InGroup(group_id, Some(0)),
                 }
@@ -454,7 +458,8 @@ impl TabStrip {
                 },
             )) => (
                 section,
-                self.group_location(parent).map_or(0, |(_, index)| index + 1),
+                self.group_location(parent)
+                    .map_or(0, |(_, index)| index + 1),
             ),
             None => (Section::Unpinned, self.unpinned.len()),
         };
@@ -546,10 +551,9 @@ impl TabStrip {
                     })
                     .or_else(|| match anchor {
                         // Anchoring on a grouped tab means "next to its group".
-                        Item::Tab(tab) => self.location_of(tab).and_then(|loc| {
-                            loc.group
-                                .and_then(|g| self.group_location(g))
-                        }),
+                        Item::Tab(tab) => self
+                            .location_of(tab)
+                            .and_then(|loc| loc.group.and_then(|g| self.group_location(g))),
                         Item::Group(_) => None,
                     });
                 match found {
@@ -581,7 +585,12 @@ impl TabStrip {
 
     /// Adds a group (with its tabs) at the end of `section`. Tab membership
     /// is taken from `group.tabs`; tabs not listed there are appended.
-    pub fn insert_group(&mut self, mut group: TabGroup, tabs: Vec<Tab>, section: Section) -> GroupId {
+    pub fn insert_group(
+        &mut self,
+        mut group: TabGroup,
+        tabs: Vec<Tab>,
+        section: Section,
+    ) -> GroupId {
         let id = group.id;
         for tab in tabs {
             if !group.tabs.contains(&tab.id) {
@@ -707,7 +716,10 @@ mod tests {
         assert!(strip.is_pinned(ids[2]));
         assert_eq!(strip.ordered_tab_ids()[0], ids[2]);
         assert_eq!(
-            strip.tab(ids[2]).and_then(|t| t.home_url.clone()).as_deref(),
+            strip
+                .tab(ids[2])
+                .and_then(|t| t.home_url.clone())
+                .as_deref(),
             Some("https://site2.test")
         );
         assert!(strip.unpin(ids[2]));
@@ -728,7 +740,10 @@ mod tests {
     fn groups_collect_members_and_collapse() {
         let (mut strip, ids) = strip_with(4);
         let group = strip.create_group("Research", AccentColor::Ocean, &[ids[1], ids[3]]);
-        assert_eq!(strip.ordered_tab_ids(), vec![ids[0], ids[1], ids[3], ids[2]]);
+        assert_eq!(
+            strip.ordered_tab_ids(),
+            vec![ids[0], ids[1], ids[3], ids[2]]
+        );
         assert_eq!(strip.location_of(ids[3]).and_then(|l| l.group), Some(group));
 
         strip.set_group_collapsed(group, true);
@@ -766,7 +781,10 @@ mod tests {
         let (mut strip, ids) = strip_with(3);
         let group = strip.create_group("G", AccentColor::Rose, &[ids[0]]);
         assert!(strip.move_tab(ids[2], Placement::InGroup(group, Some(0))));
-        assert_eq!(strip.group(group).map(|g| g.tabs.clone()), Some(vec![ids[2], ids[0]]));
+        assert_eq!(
+            strip.group(group).map(|g| g.tabs.clone()),
+            Some(vec![ids[2], ids[0]])
+        );
         assert!(strip.move_tab(ids[2], Placement::AfterGroup(group)));
         assert_eq!(strip.location_of(ids[2]).and_then(|l| l.group), None);
         assert_eq!(strip.ordered_tab_ids(), vec![ids[0], ids[2], ids[1]]);
@@ -815,7 +833,11 @@ mod tests {
         let strip = TabStrip::from_parts(
             vec![tab.clone(), orphan.clone()],
             vec![],
-            vec![Item::Tab(TabId::new()), Item::Tab(tab.id), Item::Tab(tab.id)],
+            vec![
+                Item::Tab(TabId::new()),
+                Item::Tab(tab.id),
+                Item::Tab(tab.id),
+            ],
             vec![Item::Group(GroupId::new())],
         );
         assert_eq!(strip.ordered_tab_ids(), vec![tab.id, orphan.id]);

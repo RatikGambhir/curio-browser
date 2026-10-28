@@ -119,7 +119,11 @@ pub(crate) fn migrate(conn: &mut Connection) -> Result<()> {
         );
         return Ok(());
     }
-    for (index, sql) in MIGRATIONS.iter().enumerate().skip(usize::try_from(current).unwrap_or(0)) {
+    for (index, sql) in MIGRATIONS
+        .iter()
+        .enumerate()
+        .skip(usize::try_from(current).unwrap_or(0))
+    {
         let version = index as i64 + 1;
         let tx = conn.transaction()?;
         tx.execute_batch(sql)?;

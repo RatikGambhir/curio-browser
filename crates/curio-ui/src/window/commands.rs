@@ -5,7 +5,6 @@ use curio_core::AccentColor;
 use curio_settings::TabLayout;
 use curio_spaces::TabOwner;
 use gpui_kit::component::WindowExt as _;
-use gpui_kit::Focusable as _;
 use gpui_kit::{ClipboardItem, Context, Div, InteractiveElement as _, Stateful, Window};
 
 use super::BrowserWindow;
@@ -15,7 +14,11 @@ use crate::settings;
 
 impl BrowserWindow {
     /// Attaches every action handler to the root element.
-    pub(crate) fn register_actions(&self, root: Stateful<Div>, cx: &mut Context<Self>) -> Stateful<Div> {
+    pub(crate) fn register_actions(
+        &self,
+        root: Stateful<Div>,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
         root
             // Tabs
             .on_action(cx.listener(|this, _: &NewTab, window, cx| {
@@ -67,17 +70,39 @@ impl BrowserWindow {
                     window.push_notification("Link copied", cx);
                 }
             }))
-            .on_action(cx.listener(|this, _: &NextTab, window, cx| this.cycle_tab(true, window, cx)))
-            .on_action(cx.listener(|this, _: &PreviousTab, window, cx| this.cycle_tab(false, window, cx)))
-            .on_action(cx.listener(|this, _: &SelectTab1, w, cx| this.select_tab_index(Some(0), w, cx)))
-            .on_action(cx.listener(|this, _: &SelectTab2, w, cx| this.select_tab_index(Some(1), w, cx)))
-            .on_action(cx.listener(|this, _: &SelectTab3, w, cx| this.select_tab_index(Some(2), w, cx)))
-            .on_action(cx.listener(|this, _: &SelectTab4, w, cx| this.select_tab_index(Some(3), w, cx)))
-            .on_action(cx.listener(|this, _: &SelectTab5, w, cx| this.select_tab_index(Some(4), w, cx)))
-            .on_action(cx.listener(|this, _: &SelectTab6, w, cx| this.select_tab_index(Some(5), w, cx)))
-            .on_action(cx.listener(|this, _: &SelectTab7, w, cx| this.select_tab_index(Some(6), w, cx)))
-            .on_action(cx.listener(|this, _: &SelectTab8, w, cx| this.select_tab_index(Some(7), w, cx)))
-            .on_action(cx.listener(|this, _: &SelectLastTab, w, cx| this.select_tab_index(None, w, cx)))
+            .on_action(
+                cx.listener(|this, _: &NextTab, window, cx| this.cycle_tab(true, window, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &PreviousTab, window, cx| this.cycle_tab(false, window, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &SelectTab1, w, cx| this.select_tab_index(Some(0), w, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &SelectTab2, w, cx| this.select_tab_index(Some(1), w, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &SelectTab3, w, cx| this.select_tab_index(Some(2), w, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &SelectTab4, w, cx| this.select_tab_index(Some(3), w, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &SelectTab5, w, cx| this.select_tab_index(Some(4), w, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &SelectTab6, w, cx| this.select_tab_index(Some(5), w, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &SelectTab7, w, cx| this.select_tab_index(Some(6), w, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &SelectTab8, w, cx| this.select_tab_index(Some(7), w, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &SelectLastTab, w, cx| this.select_tab_index(None, w, cx)),
+            )
             // Navigation
             .on_action(cx.listener(|this, _: &GoBack, _, cx| {
                 if let Some(tab) = this.active_tab_entity() {
@@ -108,7 +133,9 @@ impl BrowserWindow {
                     this.open_find(window, cx);
                 }
             }))
-            .on_action(cx.listener(|this, _: &FindPrevious, window, cx| this.run_find(false, window, cx)))
+            .on_action(
+                cx.listener(|this, _: &FindPrevious, window, cx| this.run_find(false, window, cx)),
+            )
             .on_action(cx.listener(|this, _: &ZoomIn, _, cx| this.zoom_by(0.1, cx)))
             .on_action(cx.listener(|this, _: &ZoomOut, _, cx| this.zoom_by(-0.1, cx)))
             .on_action(cx.listener(|this, _: &ZoomReset, _, cx| this.zoom_to(1.0, cx)))
@@ -122,10 +149,16 @@ impl BrowserWindow {
                     tab.read(cx).print(cx);
                 }
             }))
-            .on_action(cx.listener(|this, _: &ShowHistory, window, cx| this.show_history(window, cx)))
-            .on_action(cx.listener(|this, _: &ShowDownloads, window, cx| this.show_downloads(window, cx)))
+            .on_action(
+                cx.listener(|this, _: &ShowHistory, window, cx| this.show_history(window, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &ShowDownloads, window, cx| this.show_downloads(window, cx)),
+            )
             // Spaces
-            .on_action(cx.listener(|this, _: &NewSpace, window, cx| this.edit_space(None, window, cx)))
+            .on_action(
+                cx.listener(|this, _: &NewSpace, window, cx| this.edit_space(None, window, cx)),
+            )
             .on_action(cx.listener(|this, _: &NextSpace, window, cx| {
                 if let Some(id) = this.workspace.adjacent_space(true) {
                     this.switch_space(id, window, cx);
@@ -136,22 +169,42 @@ impl BrowserWindow {
                     this.switch_space(id, window, cx);
                 }
             }))
-            .on_action(cx.listener(|this, _: &SelectSpace1, w, cx| this.select_space_index(0, w, cx)))
-            .on_action(cx.listener(|this, _: &SelectSpace2, w, cx| this.select_space_index(1, w, cx)))
-            .on_action(cx.listener(|this, _: &SelectSpace3, w, cx| this.select_space_index(2, w, cx)))
-            .on_action(cx.listener(|this, _: &SelectSpace4, w, cx| this.select_space_index(3, w, cx)))
-            .on_action(cx.listener(|this, _: &SelectSpace5, w, cx| this.select_space_index(4, w, cx)))
-            .on_action(cx.listener(|this, _: &SelectSpace6, w, cx| this.select_space_index(5, w, cx)))
-            .on_action(cx.listener(|this, _: &SelectSpace7, w, cx| this.select_space_index(6, w, cx)))
-            .on_action(cx.listener(|this, _: &SelectSpace8, w, cx| this.select_space_index(7, w, cx)))
-            .on_action(cx.listener(|this, _: &SelectSpace9, w, cx| this.select_space_index(8, w, cx)))
+            .on_action(
+                cx.listener(|this, _: &SelectSpace1, w, cx| this.select_space_index(0, w, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &SelectSpace2, w, cx| this.select_space_index(1, w, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &SelectSpace3, w, cx| this.select_space_index(2, w, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &SelectSpace4, w, cx| this.select_space_index(3, w, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &SelectSpace5, w, cx| this.select_space_index(4, w, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &SelectSpace6, w, cx| this.select_space_index(5, w, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &SelectSpace7, w, cx| this.select_space_index(6, w, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &SelectSpace8, w, cx| this.select_space_index(7, w, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &SelectSpace9, w, cx| this.select_space_index(8, w, cx)),
+            )
             // Layout
             .on_action(cx.listener(|this, _: &ToggleSidebar, _, cx| {
                 if this.layout(cx) == TabLayout::Horizontal {
                     return;
                 }
                 this.sidebar_peek = false;
-                crate::update_settings(cx, |s| s.appearance.sidebar_visible = !s.appearance.sidebar_visible);
+                crate::update_settings(cx, |s| {
+                    s.appearance.sidebar_visible = !s.appearance.sidebar_visible
+                });
             }))
             .on_action(cx.listener(|_, _: &ToggleTabLayout, _, cx| {
                 crate::update_settings(cx, |s| {
@@ -161,15 +214,19 @@ impl BrowserWindow {
                     };
                 });
             }))
-            .on_action(cx.listener(|this, _: &ToggleAiPanel, window, cx| this.toggle_ai(window, cx)))
+            .on_action(
+                cx.listener(|this, _: &ToggleAiPanel, window, cx| this.toggle_ai(window, cx)),
+            )
             .on_action(cx.listener(|this, _: &NewChat, window, cx| {
-                this.ai_panel.update(cx, |panel, cx| panel.new_conversation(cx));
+                this.ai_panel
+                    .update(cx, |panel, cx| panel.new_conversation(cx));
                 this.show_ai(window, cx);
             }))
             .on_action(cx.listener(|this, _: &AskAboutPage, window, cx| {
                 this.show_ai(window, cx);
-                this.ai_panel
-                    .update(cx, |panel, cx| panel.quick_action(&QuickAction::SummarizePage, window, cx));
+                this.ai_panel.update(cx, |panel, cx| {
+                    panel.quick_action(&QuickAction::SummarizePage, window, cx)
+                });
             }))
             .on_action(cx.listener(|this, _: &ExplainSelection, window, cx| {
                 this.ask_about_selection(QuickAction::ExplainSelection, window, cx);
@@ -177,7 +234,9 @@ impl BrowserWindow {
             .on_action(cx.listener(|this, _: &SummarizeSelection, window, cx| {
                 this.ask_about_selection(QuickAction::SummarizeSelection, window, cx);
             }))
-            .on_action(cx.listener(|this, _: &OpenSettings, window, cx| this.open_settings(None, window, cx)))
+            .on_action(cx.listener(|this, _: &OpenSettings, window, cx| {
+                this.open_settings(None, window, cx)
+            }))
             .on_action(cx.listener(|this, _: &About, window, cx| this.show_about(window, cx)))
             // Window
             .on_action(cx.listener(|this, _: &Quit, _, cx| {
@@ -193,12 +252,26 @@ impl BrowserWindow {
     }
 
     /// Runs a command bar selection.
-    pub(crate) fn execute_command(&mut self, target: CommandTarget, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn execute_command(
+        &mut self,
+        target: CommandTarget,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         match target {
             CommandTarget::Navigate { url, new_tab } => {
-                let reuse = self.workspace.active_tab().is_some_and(curio_core::Tab::is_new_tab_page);
+                let reuse = self
+                    .workspace
+                    .active_tab()
+                    .is_some_and(curio_core::Tab::is_new_tab_page);
                 if new_tab && !reuse {
-                    self.open_url_in_new_tab(&url, self.workspace.active_tab_id(), true, window, cx);
+                    self.open_url_in_new_tab(
+                        &url,
+                        self.workspace.active_tab_id(),
+                        true,
+                        window,
+                        cx,
+                    );
                 } else {
                     self.navigate_active(&url, window, cx);
                 }
@@ -214,7 +287,8 @@ impl BrowserWindow {
             },
             CommandTarget::AskAi(question) => {
                 self.show_ai(window, cx);
-                self.ai_panel.update(cx, |panel, cx| panel.ask(&question, window, cx));
+                self.ai_panel
+                    .update(cx, |panel, cx| panel.ask(&question, window, cx));
             }
         }
     }
@@ -249,11 +323,23 @@ impl BrowserWindow {
         cx.notify();
     }
 
-    pub(crate) fn add_favorite(&mut self, id: curio_core::TabId, window: &mut Window, cx: &mut Context<Self>) {
-        if matches!(self.workspace.find_tab(id), Some((TabOwner::Favorite(_), _))) {
+    pub(crate) fn add_favorite(
+        &mut self,
+        id: curio_core::TabId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if matches!(
+            self.workspace.find_tab(id),
+            Some((TabOwner::Favorite(_), _))
+        ) {
             return;
         }
-        if self.workspace.tab(id).is_some_and(curio_core::Tab::is_new_tab_page) {
+        if self
+            .workspace
+            .tab(id)
+            .is_some_and(curio_core::Tab::is_new_tab_page)
+        {
             return;
         }
         if self.workspace.favorite_from_tab(id).is_some() {
@@ -294,7 +380,12 @@ impl BrowserWindow {
     }
 
     fn toggle_bookmark(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(tab) = self.workspace.active_tab().filter(|t| t.url.starts_with("http")).cloned() else {
+        let Some(tab) = self
+            .workspace
+            .active_tab()
+            .filter(|t| t.url.starts_with("http"))
+            .cloned()
+        else {
             return;
         };
         let storage = crate::Services::get(cx).storage.clone();
@@ -343,7 +434,8 @@ impl BrowserWindow {
         if let Some(tab) = self.active_tab_entity() {
             tab.read(cx).blur_page(cx);
         }
-        self.ai_panel.update(cx, |panel, cx| panel.focus_composer(window, cx));
+        self.ai_panel
+            .update(cx, |panel, cx| panel.focus_composer(window, cx));
         cx.notify();
     }
 
@@ -358,7 +450,12 @@ impl BrowserWindow {
     }
 
     /// Sends the current page selection to the assistant with an action.
-    pub(crate) fn ask_about_selection(&mut self, action: QuickAction, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn ask_about_selection(
+        &mut self,
+        action: QuickAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let selection = self
             .active_tab_entity()
             .and_then(|t| t.read(cx).state().selection.clone())
@@ -371,7 +468,9 @@ impl BrowserWindow {
             other => other,
         };
         self.ai_panel.update(cx, |panel, cx| match &selection {
-            Some(text) if !text.trim().is_empty() => panel.ask_about_selection(&action, text, window, cx),
+            Some(text) if !text.trim().is_empty() => {
+                panel.ask_about_selection(&action, text, window, cx)
+            }
             _ => panel.quick_action(&QuickAction::SummarizePage, window, cx),
         });
     }
@@ -387,6 +486,7 @@ impl BrowserWindow {
             return;
         };
         self.show_ai(window, cx);
-        self.ai_panel.update(cx, |panel, cx| panel.prefill_quote(&text, window, cx));
+        self.ai_panel
+            .update(cx, |panel, cx| panel.prefill_quote(&text, window, cx));
     }
 }

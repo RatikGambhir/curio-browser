@@ -93,7 +93,10 @@ fn dev_proxy() -> Option<wry::ProxyConfig> {
 /// external application.
 #[must_use]
 pub fn is_engine_navigable(url: &str) -> bool {
-    let scheme = url.split_once(':').map_or("", |(s, _)| s).to_ascii_lowercase();
+    let scheme = url
+        .split_once(':')
+        .map_or("", |(s, _)| s)
+        .to_ascii_lowercase();
     matches!(
         scheme.as_str(),
         "http" | "https" | "about" | "data" | "blob" | "file"
@@ -106,9 +109,10 @@ pub fn unique_path(path: &Path) -> PathBuf {
     if !path.exists() {
         return path.to_path_buf();
     }
-    let stem = path
-        .file_stem()
-        .map_or_else(|| "download".to_owned(), |s| s.to_string_lossy().into_owned());
+    let stem = path.file_stem().map_or_else(
+        || "download".to_owned(),
+        |s| s.to_string_lossy().into_owned(),
+    );
     let ext = path
         .extension()
         .map(|e| format!(".{}", e.to_string_lossy()))

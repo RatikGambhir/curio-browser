@@ -176,7 +176,7 @@ pub const EXTRACT_CONTENT: &str = r#"
   }
   // innerText needs layout; attach the clone off-screen to measure it.
   const holder = document.createElement('div');
-  holder.style.cssText = 'position:fixed;left:-99999px;top:0;width:900px;visibility:hidden;';
+  holder.style.cssText = 'position:absolute;left:-99999px;top:0;width:900px;opacity:0;pointer-events:none;';
   holder.appendChild(clone);
   (document.body || document.documentElement).appendChild(holder);
   let text = clone.innerText || clone.textContent || '';

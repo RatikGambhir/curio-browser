@@ -5,12 +5,12 @@ use std::time::Duration;
 
 use curio_ai::PageContext;
 use curio_browser::{BrowserTab, BrowserTabEvent};
-use curio_core::{NEW_TAB_URL, SpaceId, Tab, TabId, display_host, is_internal_url};
+use curio_core::{SpaceId, Tab, TabId, display_host, is_internal_url};
 use curio_spaces::TabOwner;
 use curio_tabs::{Placement, Section};
+use gpui_kit::Focusable as _;
 use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::notification::Notification;
-use gpui_kit::Focusable as _;
 use gpui_kit::{AppContext as _, Context, Entity, Window};
 
 use super::{BrowserWindow, DownloadItem};
@@ -133,7 +133,12 @@ impl BrowserWindow {
             .and_then(|t| self.workspace.space_of_tab(t))
             .unwrap_or_else(|| self.workspace.active_space_id());
         let placement = match after {
-            Some(after) if self.workspace.space(space).is_some_and(|s| !s.strip.is_pinned(after)) => {
+            Some(after)
+                if self
+                    .workspace
+                    .space(space)
+                    .is_some_and(|s| !s.strip.is_pinned(after)) =>
+            {
                 Placement::AfterTab(after)
             }
             _ => Placement::SectionStart(Section::Unpinned),
@@ -150,8 +155,23 @@ impl BrowserWindow {
         id
     }
 
+    /// Opens a URL handed to Curio by the operating system or command line.
+    pub fn open_external_url(&mut self, url: &str, window: &mut Window, cx: &mut Context<Self>) {
+        if !curio_browser::is_engine_navigable(url) {
+            return;
+        }
+        self.command_mode = None;
+        self.open_url_in_new_tab(url, None, true, window, cx);
+        window.activate_window();
+    }
+
     /// Navigates the active tab, or opens a tab when there is none.
-    pub(crate) fn navigate_active(&mut self, url: &str, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn navigate_active(
+        &mut self,
+        url: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(id) = self.workspace.active_tab_id() else {
             self.open_url_in_new_tab(url, None, true, window, cx);
             return;
@@ -172,14 +192,6 @@ impl BrowserWindow {
         cx.notify();
     }
 
-    /// Opens Curio's new tab page in a fresh tab.
-    pub(crate) fn open_new_tab_page(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.workspace.active_tab().is_some_and(Tab::is_new_tab_page) {
-            return;
-        }
-        self.open_url_in_new_tab(NEW_TAB_URL, self.workspace.active_tab_id(), true, window, cx);
-    }
-
     /// Closes a tab. Favorites are not closed but put to sleep and hidden.
     pub(crate) fn close_tab(&mut self, id: TabId, window: &mut Window, cx: &mut Context<Self>) {
         match self.workspace.find_tab(id).map(|(owner, _)| owner) {
@@ -188,7 +200,13 @@ impl BrowserWindow {
                     entity.update(cx, |tab, cx| tab.sleep(cx));
                 }
                 if self.workspace.active_tab_id() == Some(id) {
-                    let first = self.workspace.active_space().strip.ordered_tab_ids().first().copied();
+                    let first = self
+                        .workspace
+                        .active_space()
+                        .strip
+                        .ordered_tab_ids()
+                        .first()
+                        .copied();
                     self.workspace.active_space_mut().active_tab = first;
                 }
                 self.release_tab(id);
@@ -217,7 +235,12 @@ impl BrowserWindow {
     }
 
     /// Switches to another space with an animated transition.
-    pub(crate) fn switch_space(&mut self, id: SpaceId, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn switch_space(
+        &mut self,
+        id: SpaceId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let previous = self.workspace.active_space_id();
         if !self.workspace.switch_space(id) {
             return;
@@ -227,7 +250,12 @@ impl BrowserWindow {
         self.schedule_save(cx);
     }
 
-    fn after_space_change(&mut self, previous: SpaceId, window: &mut Window, cx: &mut Context<Self>) {
+    fn after_space_change(
+        &mut self,
+        previous: SpaceId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let from = self.workspace.space_index(previous).unwrap_or(0);
         let to = self
             .workspace
@@ -239,7 +267,12 @@ impl BrowserWindow {
     }
 
     /// Selects the nth tab of the active space (0-based), or the last.
-    pub(crate) fn select_tab_index(&mut self, index: Option<usize>, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn select_tab_index(
+        &mut self,
+        index: Option<usize>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let order = self.visible_tab_order();
         let target = match index {
             Some(i) => order.get(i).copied(),
@@ -293,7 +326,9 @@ impl BrowserWindow {
             .map(|(id, e)| (*id, e.read(cx).last_active()))
             .collect();
         awake.sort_by_key(|(_, last)| *last);
-        let excess = awake.len().saturating_sub(browsing.max_live_tabs.saturating_sub(1));
+        let excess = awake
+            .len()
+            .saturating_sub(browsing.max_live_tabs.saturating_sub(1));
         for (index, (id, last)) in awake.iter().enumerate() {
             if index < excess || last.elapsed() > idle_limit {
                 if let Some(entity) = self.tabs.get(id) {
@@ -336,7 +371,11 @@ impl BrowserWindow {
                 if changed {
                     self.schedule_save(cx);
                     if self.workspace.active_tab_id() == Some(id) {
-                        let title = self.workspace.tab(id).map(Tab::display_title).unwrap_or_default();
+                        let title = self
+                            .workspace
+                            .tab(id)
+                            .map(Tab::display_title)
+                            .unwrap_or_default();
                         window.set_window_title(&title);
                         self.update_ai_context(cx);
                     }
@@ -345,7 +384,10 @@ impl BrowserWindow {
             }
             BrowserTabEvent::Navigated { url } => self.record_visit(url, id, cx),
             BrowserTabEvent::LoadFinished { url, title } => {
-                if settings(cx).browsing.save_history && !title.is_empty() && url.starts_with("http") {
+                if settings(cx).browsing.save_history
+                    && !title.is_empty()
+                    && url.starts_with("http")
+                {
                     let storage = Services::get(cx).storage.clone();
                     let (url, title) = (url.clone(), title.clone());
                     cx.background_spawn(async move {
@@ -397,14 +439,15 @@ impl BrowserWindow {
                 let name = std::path::Path::new(path)
                     .file_name()
                     .map_or_else(|| display_host(url), |n| n.to_string_lossy().into_owned());
-                window.push_notification(
-                    Notification::info(name).title("Downloading"),
-                    cx,
-                );
+                window.push_notification(Notification::info(name).title("Downloading"), cx);
                 cx.notify();
             }
             BrowserTabEvent::DownloadFinished { url, path, success } => {
-                if let Some(item) = self.downloads.iter_mut().find(|d| &d.url == url && !d.finished) {
+                if let Some(item) = self
+                    .downloads
+                    .iter_mut()
+                    .find(|d| &d.url == url && !d.finished)
+                {
                     item.finished = true;
                     item.success = *success;
                     if path.is_some() {
@@ -417,7 +460,11 @@ impl BrowserWindow {
                     let _ = storage.with(|db| db.finish_download(&u, p.as_deref(), ok));
                 })
                 .detach();
-                let message = if *success { "Download complete" } else { "Download failed" };
+                let message = if *success {
+                    "Download complete"
+                } else {
+                    "Download failed"
+                };
                 let note = if *success {
                     Notification::success(display_host(url))
                 } else {
@@ -433,7 +480,11 @@ impl BrowserWindow {
         if !settings(cx).browsing.save_history || !url.starts_with("http") {
             return;
         }
-        let title = self.workspace.tab(id).map(|t| t.title.clone()).unwrap_or_default();
+        let title = self
+            .workspace
+            .tab(id)
+            .map(|t| t.title.clone())
+            .unwrap_or_default();
         let storage = Services::get(cx).storage.clone();
         let url = url.to_owned();
         cx.background_spawn(async move {
@@ -458,7 +509,10 @@ impl BrowserWindow {
 
     /// Tells the assistant which tabs it could use.
     pub(crate) fn update_ai_context(&mut self, cx: &mut Context<Self>) {
-        let current = self.workspace.active_tab_id().and_then(|id| self.context_tab(id));
+        let current = self
+            .workspace
+            .active_tab_id()
+            .and_then(|id| self.context_tab(id));
         let space = self.workspace.active_space();
         let space_info = (space.id, space.name.clone());
         let space_tabs: Vec<ContextTab> = space
@@ -536,9 +590,14 @@ impl BrowserWindow {
     // ----- Find in page -----------------------------------------------------
 
     pub(crate) fn open_find(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.active_tab_entity().is_none_or(|t| !t.read(cx).is_awake()) {
+        if self
+            .active_tab_entity()
+            .is_none_or(|t| !t.read(cx).is_awake())
+        {
+            tracing::debug!("find: no loaded page");
             return;
         }
+        tracing::debug!("find: opening");
         self.find.open = true;
         let handle = self.find.input.read(cx).focus_handle(cx);
         if let Some(tab) = self.active_tab_entity() {

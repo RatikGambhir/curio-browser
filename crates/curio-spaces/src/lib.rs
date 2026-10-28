@@ -18,8 +18,8 @@ pub const CLOSED_TAB_LIMIT: usize = 50;
 
 /// Icons offered when creating or customizing a space.
 pub const SPACE_ICONS: [&str; 24] = [
-    "✦", "☀︎", "☾", "◆", "●", "▲", "♠︎", "♣︎", "♥︎", "⚑", "✿", "❖", "🧭", "🔭", "🧪", "📚", "💼",
-    "🎨", "🎧", "🌿", "🏔", "⚡️", "🚀", "🏠",
+    "✦", "☀︎", "☾", "◆", "●", "▲", "♠︎", "♣︎", "♥︎", "⚑", "✿", "❖", "🧭", "🔭", "🧪", "📚", "💼", "🎨",
+    "🎧", "🌿", "🏔", "⚡️", "🚀", "🏠",
 ];
 
 /// An independent browsing context with its own tabs and appearance.
@@ -98,7 +98,10 @@ pub struct Workspace {
 
 impl Default for Workspace {
     fn default() -> Self {
-        Self::with_spaces(vec![Space::new("Personal", "✦", AccentColor::Iris)], Vec::new())
+        Self::with_spaces(
+            vec![Space::new("Personal", "✦", AccentColor::Iris)],
+            Vec::new(),
+        )
     }
 }
 
@@ -354,7 +357,10 @@ impl Workspace {
 
     fn placement_near_active(&self) -> Placement {
         let space = self.active_space();
-        match space.active_tab.and_then(|id| space.strip.location_of(id).map(|l| (id, l))) {
+        match space
+            .active_tab
+            .and_then(|id| space.strip.location_of(id).map(|l| (id, l)))
+        {
             Some((id, location)) if location.section == Section::Unpinned => {
                 Placement::AfterTab(id)
             }
@@ -438,7 +444,12 @@ impl Workspace {
             }
             None => {
                 let space = self.active_space;
-                self.open_tab(space, copy, Placement::SectionStart(Section::Unpinned), true)?;
+                self.open_tab(
+                    space,
+                    copy,
+                    Placement::SectionStart(Section::Unpinned),
+                    true,
+                )?;
             }
         }
         Some(copy_id)
@@ -472,7 +483,12 @@ impl Workspace {
     }
 
     /// Moves a whole group (and its tabs) to another space.
-    pub fn move_group_to_space(&mut self, group: GroupId, source: SpaceId, target: SpaceId) -> bool {
+    pub fn move_group_to_space(
+        &mut self,
+        group: GroupId,
+        source: SpaceId,
+        target: SpaceId,
+    ) -> bool {
         if source == target || self.space(target).is_none() {
             return false;
         }
@@ -518,7 +534,12 @@ impl Workspace {
     }
 
     /// Adds a favorite for a URL; returns `None` when it already exists.
-    pub fn add_favorite(&mut self, url: &str, title: &str, favicon: Option<String>) -> Option<FavoriteId> {
+    pub fn add_favorite(
+        &mut self,
+        url: &str,
+        title: &str,
+        favicon: Option<String>,
+    ) -> Option<FavoriteId> {
         if self
             .favorites
             .iter()
@@ -615,7 +636,12 @@ mod tests {
     fn spaces_keep_independent_active_tabs() {
         let (mut ws, a, b, ids) = workspace_with_tabs();
         let tab_b = ws
-            .open_tab(b, Tab::new("https://b.test"), Placement::SectionEnd(Section::Unpinned), true)
+            .open_tab(
+                b,
+                Tab::new("https://b.test"),
+                Placement::SectionEnd(Section::Unpinned),
+                true,
+            )
             .expect("space exists");
         ws.activate_tab(ids[0]);
         assert_eq!(ws.active_space_id(), a);
@@ -648,11 +674,11 @@ mod tests {
     #[test]
     fn move_group_between_spaces() {
         let (mut ws, a, b, ids) = workspace_with_tabs();
-        let group = ws
-            .space_mut(a)
-            .expect("space")
-            .strip
-            .create_group("Docs", AccentColor::Ocean, &[ids[0], ids[1]]);
+        let group = ws.space_mut(a).expect("space").strip.create_group(
+            "Docs",
+            AccentColor::Ocean,
+            &[ids[0], ids[1]],
+        );
         assert!(ws.move_group_to_space(group, a, b));
         assert_eq!(ws.space(b).map(|s| s.strip.len()), Some(2));
         assert!(ws.space(b).and_then(|s| s.strip.group(group)).is_some());
@@ -675,7 +701,11 @@ mod tests {
         let fav_tab = ws.favorites()[0].tab.id;
         ws.switch_space(b);
         assert!(ws.activate_tab(fav_tab));
-        assert_eq!(ws.active_space_id(), b, "favorites open in the current space");
+        assert_eq!(
+            ws.active_space_id(),
+            b,
+            "favorites open in the current space"
+        );
         assert!(ws.remove_favorite(fav).is_some());
         assert!(ws.tab(fav_tab).is_none());
     }

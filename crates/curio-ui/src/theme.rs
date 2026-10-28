@@ -193,7 +193,12 @@ impl CurioTheme {
 
     /// Installs tokens for `accent` and `appearance`, and keeps the component
     /// library theme in step.
-    pub fn apply(accent: AccentColor, appearance: Appearance, window: Option<&mut Window>, cx: &mut App) {
+    pub fn apply(
+        accent: AccentColor,
+        appearance: Appearance,
+        window: Option<&mut Window>,
+        cx: &mut App,
+    ) {
         let tokens = Self::new(accent, appearance);
         let mode = match appearance {
             Appearance::Light => ThemeMode::Light,

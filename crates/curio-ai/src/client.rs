@@ -372,7 +372,10 @@ mod tests {
             api_key: Some("bad".into()),
         };
         let events = collect(&start_stream(config, request()));
-        assert!(matches!(&events[..], [StreamEvent::Error(AiError::Unauthorized(_))]));
+        assert!(matches!(
+            &events[..],
+            [StreamEvent::Error(AiError::Unauthorized(_))]
+        ));
     }
 
     #[test]
@@ -384,7 +387,10 @@ mod tests {
             api_key: None,
         };
         let events = collect(&start_stream(config, request()));
-        assert!(matches!(&events[..], [StreamEvent::Error(AiError::MissingApiKey(_))]));
+        assert!(matches!(
+            &events[..],
+            [StreamEvent::Error(AiError::MissingApiKey(_))]
+        ));
     }
 
     #[test]

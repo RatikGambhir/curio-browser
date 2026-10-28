@@ -17,7 +17,10 @@ pub enum PageMessage {
     /// Open a link in a new tab (Cmd-click or middle-click).
     OpenLink { url: String, background: bool },
     /// The selection changed; empty text means it was cleared.
-    Selection { text: String, rect: Option<PageRect> },
+    Selection {
+        text: String,
+        rect: Option<PageRect>,
+    },
     /// Page metadata.
     Meta {
         favicon: Option<String>,
@@ -87,9 +90,9 @@ pub fn parse_message(body: &str, token: &str, allowed_keys: &[String]) -> Option
         }),
         "selection" => {
             let text: String = raw.text.unwrap_or_default().chars().take(20_000).collect();
-            let rect = raw.rect.filter(|r| {
-                [r.x, r.y, r.width, r.height].iter().all(|v| v.is_finite())
-            });
+            let rect = raw
+                .rect
+                .filter(|r| [r.x, r.y, r.width, r.height].iter().all(|v| v.is_finite()));
             Some(PageMessage::Selection { text, rect })
         }
         "meta" => Some(PageMessage::Meta {
@@ -165,7 +168,10 @@ mod tests {
             Some(PageMessage::Selection { rect: Some(_), .. })
         ));
         let scroll = r#"{"token":"secret","type":"scroll","y":-40}"#;
-        assert_eq!(parse_message(scroll, T, &keys()), Some(PageMessage::Scroll { y: 0.0 }));
+        assert_eq!(
+            parse_message(scroll, T, &keys()),
+            Some(PageMessage::Scroll { y: 0.0 })
+        );
     }
 
     #[test]
@@ -173,7 +179,10 @@ mod tests {
         let body = r#"{"token":"secret","type":"meta","favicon":"data:image/png;base64,AAAA"}"#;
         assert!(matches!(
             parse_message(body, T, &keys()),
-            Some(PageMessage::Meta { favicon: Some(_), .. })
+            Some(PageMessage::Meta {
+                favicon: Some(_),
+                ..
+            })
         ));
         let body = r#"{"token":"secret","type":"meta","favicon":"data:text/html,<b>x</b>"}"#;
         assert!(matches!(

@@ -4,14 +4,14 @@
 use curio_core::omnibox::{Navigation, classify_input};
 use curio_core::{SearchEngine, TabId, display_host};
 use curio_storage::{Bookmark, HistoryEntry};
+use gpui_kit::assets::IconName;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::{Icon, Sizable as _, h_flex, v_flex};
-use gpui_kit::assets::IconName;
 use gpui_kit::{
-    AnyElement, AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable,
-    FontWeight, InteractiveElement as _, IntoElement, KeyDownEvent, ParentElement as _, Render,
-    ScrollHandle, SharedString, StatefulInteractiveElement as _, Styled as _, Subscription, Task,
-    Window, div, px,
+    AnyElement, AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable, FontWeight,
+    InteractiveElement as _, IntoElement, KeyDownEvent, ParentElement as _, Render, ScrollHandle,
+    SharedString, StatefulInteractiveElement as _, Styled as _, Subscription, Task, Window, div,
+    px,
 };
 
 use crate::components::{favicon, shortcut_hint};
@@ -32,7 +32,10 @@ pub enum CommandMode {
 /// What executing an item does.
 #[derive(Debug, Clone, PartialEq)]
 pub enum CommandTarget {
-    Navigate { url: String, new_tab: bool },
+    Navigate {
+        url: String,
+        new_tab: bool,
+    },
     SwitchTab(TabId),
     /// Dispatch the GPUI action with this name.
     Action(SharedString),
@@ -75,29 +78,73 @@ struct Item {
 /// Browser commands offered in the palette: (action name, label, icon).
 const COMMANDS: &[(&str, &str, IconName)] = &[
     ("curio::NewSpace", "New Space", IconName::Plus),
-    ("curio::ToggleAiPanel", "Toggle Curio Assistant", IconName::Bot),
-    ("curio::AskAboutPage", "Summarize This Page", IconName::Sparkles),
+    (
+        "curio::ToggleAiPanel",
+        "Toggle Curio Assistant",
+        IconName::Bot,
+    ),
+    (
+        "curio::AskAboutPage",
+        "Summarize This Page",
+        IconName::Sparkles,
+    ),
     ("curio::NewChat", "New Chat", IconName::MessageSquare),
-    ("curio::ToggleSidebar", "Toggle Sidebar", IconName::PanelLeft),
-    ("curio::ToggleTabLayout", "Switch Vertical / Horizontal Tabs", IconName::LayoutDashboard),
+    (
+        "curio::ToggleSidebar",
+        "Toggle Sidebar",
+        IconName::PanelLeft,
+    ),
+    (
+        "curio::ToggleTabLayout",
+        "Switch Vertical / Horizontal Tabs",
+        IconName::LayoutDashboard,
+    ),
     ("curio::PinTab", "Pin or Unpin Tab", IconName::Star),
-    ("curio::AddFavorite", "Add Tab to Favorites", IconName::Heart),
+    (
+        "curio::AddFavorite",
+        "Add Tab to Favorites",
+        IconName::Heart,
+    ),
     ("curio::ToggleBookmark", "Bookmark Page", IconName::BookOpen),
     ("curio::DuplicateTab", "Duplicate Tab", IconName::Copy),
-    ("curio::NewGroupFromTab", "New Group from Tab", IconName::Folder),
+    (
+        "curio::NewGroupFromTab",
+        "New Group from Tab",
+        IconName::Folder,
+    ),
     ("curio::CopyUrl", "Copy URL", IconName::Link),
-    ("curio::ReopenClosedTab", "Reopen Closed Tab", IconName::Undo2),
+    (
+        "curio::ReopenClosedTab",
+        "Reopen Closed Tab",
+        IconName::Undo2,
+    ),
     ("curio::CloseTab", "Close Tab", IconName::X),
     ("curio::FindInPage", "Find in Page", IconName::Search),
-    ("curio::ShowHistory", "Show History", IconName::CalendarClock),
-    ("curio::ShowDownloads", "Show Downloads", IconName::ArrowDown),
+    (
+        "curio::ShowHistory",
+        "Show History",
+        IconName::CalendarClock,
+    ),
+    (
+        "curio::ShowDownloads",
+        "Show Downloads",
+        IconName::ArrowDown,
+    ),
     ("curio::OpenSettings", "Settings", IconName::Settings),
     ("curio::ZoomIn", "Zoom In", IconName::Plus),
     ("curio::ZoomOut", "Zoom Out", IconName::Minus),
     ("curio::ZoomReset", "Actual Size", IconName::Maximize),
-    ("curio::OpenDevTools", "Developer Tools", IconName::SquareTerminal),
+    (
+        "curio::OpenDevTools",
+        "Developer Tools",
+        IconName::SquareTerminal,
+    ),
     ("curio::NextSpace", "Next Space", IconName::ChevronRight),
-    ("curio::PreviousSpace", "Previous Space", IconName::ChevronLeft),
+    (
+        "curio::PreviousSpace",
+        "Previous Space",
+        IconName::ChevronLeft,
+    ),
 ];
 
 /// Whether every whitespace-separated term of `query` occurs in `haystack`.
@@ -245,7 +292,10 @@ impl CommandBar {
         };
 
         if self.mode == CommandMode::Palette {
-            push_commands(&mut items, if query.is_empty() { COMMANDS.len() } else { 6 });
+            push_commands(
+                &mut items,
+                if query.is_empty() { COMMANDS.len() } else { 6 },
+            );
         }
 
         if let Some(nav) = classify_input(&query, &engine) {
@@ -278,9 +328,7 @@ impl CommandBar {
         let tab_matches = self
             .tabs
             .iter()
-            .filter(|t| {
-                !query.is_empty() && matches_all(&query, &format!("{} {}", t.title, t.url))
-            })
+            .filter(|t| !query.is_empty() && matches_all(&query, &format!("{} {}", t.title, t.url)))
             .take(5);
         for tab in tab_matches {
             seen_urls.insert(tab.url.clone());
@@ -292,7 +340,11 @@ impl CommandBar {
                 } else {
                     tab.title.clone()
                 }),
-                subtitle: Some(SharedString::from(format!("{} · {}", tab.space, display_host(&tab.url)))),
+                subtitle: Some(SharedString::from(format!(
+                    "{} · {}",
+                    tab.space,
+                    display_host(&tab.url)
+                ))),
                 badge: Some("Switch to Tab"),
                 target: CommandTarget::SwitchTab(tab.id),
             });
@@ -350,7 +402,11 @@ impl CommandBar {
                     entry.title.clone()
                 }),
                 subtitle: Some(SharedString::from(entry.url.clone())),
-                badge: Some(if query.is_empty() { "Recent" } else { "History" }),
+                badge: Some(if query.is_empty() {
+                    "Recent"
+                } else {
+                    "History"
+                }),
                 target: CommandTarget::Navigate {
                     url: entry.url.clone(),
                     new_tab,
@@ -423,8 +479,16 @@ impl CommandBar {
                 .flex()
                 .items_center()
                 .justify_center()
-                .bg(if selected { theme.accent_soft } else { theme.row_hover })
-                .text_color(if selected { theme.accent_text } else { theme.text_muted })
+                .bg(if selected {
+                    theme.accent_soft
+                } else {
+                    theme.row_hover
+                })
+                .text_color(if selected {
+                    theme.accent_text
+                } else {
+                    theme.text_muted
+                })
                 .child(Icon::new(icon.clone()).small())
                 .into_any_element(),
             ItemIcon::Site(url, label) => div()
@@ -479,9 +543,15 @@ impl CommandBar {
                     h_flex()
                         .gap(px(6.))
                         .text_xs()
-                        .text_color(if selected { theme.accent_text } else { theme.text_faint })
+                        .text_color(if selected {
+                            theme.accent_text
+                        } else {
+                            theme.text_faint
+                        })
                         .child(badge)
-                        .when(selected, |el| el.child(Icon::new(IconName::CornerDownLeft).xsmall())),
+                        .when(selected, |el| {
+                            el.child(Icon::new(IconName::CornerDownLeft).xsmall())
+                        }),
                 )
             })
             .into_any_element()

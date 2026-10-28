@@ -94,10 +94,13 @@ mod tests {
     #[test]
     fn joins_multiline_data_and_ignores_comments() {
         let events = parse_all(": keep-alive\ndata: one\ndata: two\n\n");
-        assert_eq!(events, vec![SseEvent {
-            event: "message".into(),
-            data: "one\ntwo".into()
-        }]);
+        assert_eq!(
+            events,
+            vec![SseEvent {
+                event: "message".into(),
+                data: "one\ntwo".into()
+            }]
+        );
     }
 
     #[test]

@@ -16,14 +16,19 @@ use gpui_kit::{
 fn init_logging() {
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info,wgpu=warn,naga=warn"));
-    tracing_subscriber::fmt().with_env_filter(filter).with_target(false).init();
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_target(false)
+        .init();
 }
 
 fn main() -> Result<()> {
     init_logging();
 
     let storage = Storage::open_default().context("opening Curio's database")?;
-    let settings = storage.with(|db| db.load_settings()).context("loading settings")?;
+    let settings = storage
+        .with(|db| db.load_settings())
+        .context("loading settings")?;
     let workspace = if settings.browsing.restore_session {
         storage
             .with(|db| db.load_workspace())
@@ -49,6 +54,32 @@ fn main() -> Result<()> {
     #[cfg(not(target_os = "linux"))]
     let app = gpui_kit::application();
 
+    // GPUI's image loader fetches remote favicons through this client.
+    let app = match reqwest_client::ReqwestClient::user_agent(concat!(
+        "Curio/",
+        env!("CARGO_PKG_VERSION")
+    )) {
+        Ok(client) => app.with_http_client(std::sync::Arc::new(client)),
+        Err(error) => {
+            tracing::warn!(%error, "no HTTP client; site icons will not load");
+            app
+        }
+    };
+
+    // URLs to open: from the command line now, and from macOS later (links
+    // clicked in other apps when Curio is the default browser).
+    let (url_tx, url_rx) = async_channel::unbounded::<String>();
+    for arg in std::env::args().skip(1) {
+        if arg.contains("://") || arg.starts_with("file:") {
+            let _ = url_tx.try_send(arg);
+        }
+    }
+    app.on_open_urls(move |urls| {
+        for url in urls {
+            let _ = url_tx.try_send(url);
+        }
+    });
+
     app.with_assets(CurioAssets).run(move |cx| {
         gpui_kit::init(cx);
         curio_ui::init(Services { storage, secrets }, settings, cx);
@@ -71,7 +102,20 @@ fn main() -> Result<()> {
             cx.new(|cx| BrowserWindow::new(workspace, window, cx))
         });
         match opened {
-            Ok(_) => cx.activate(true),
+            Ok((handle, view)) => {
+                cx.activate(true);
+                cx.spawn(async move |cx| {
+                    while let Ok(url) = url_rx.recv().await {
+                        let view = view.clone();
+                        let _ = handle.update(cx, |_, window, cx| {
+                            view.update(cx, |browser, cx| {
+                                browser.open_external_url(&url, window, cx)
+                            });
+                        });
+                    }
+                })
+                .detach();
+            }
             Err(error) => {
                 tracing::error!(%error, "could not open the browser window");
                 cx.quit();

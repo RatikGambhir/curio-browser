@@ -3,9 +3,13 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use curio_core::chat::{ChatMessage, ContextRef, Conversation, ConversationScope, ConversationSummary, Role};
+use curio_core::chat::{
+    ChatMessage, ContextRef, Conversation, ConversationScope, ConversationSummary, Role,
+};
 use curio_core::time::{Timestamp, now_ms};
-use curio_core::{AccentColor, ConversationId, Favorite, FavoriteId, GroupId, SpaceId, Tab, TabGroup, TabId};
+use curio_core::{
+    AccentColor, ConversationId, Favorite, FavoriteId, GroupId, SpaceId, Tab, TabGroup, TabId,
+};
 use curio_settings::Settings;
 use curio_spaces::{Space, Workspace};
 use curio_tabs::{Item, TabStrip};
@@ -303,8 +307,17 @@ impl Database {
                 ))
             })?;
             for row in rows {
-                let (id, owner, url, title, favicon_url, home_url, scroll_y, created_at, last_active_at) =
-                    row?;
+                let (
+                    id,
+                    owner,
+                    url,
+                    title,
+                    favicon_url,
+                    home_url,
+                    scroll_y,
+                    created_at,
+                    last_active_at,
+                ) = row?;
                 tabs_by_owner.entry(owner).or_default().push(Tab {
                     id: parse_id(&id)?,
                     url,
@@ -480,7 +493,11 @@ impl Database {
     pub fn search_history(&self, query: &str, limit: usize) -> Result<Vec<HistoryEntry>> {
         let pattern = format!(
             "%{}%",
-            query.trim().replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_")
+            query
+                .trim()
+                .replace('\\', "\\\\")
+                .replace('%', "\\%")
+                .replace('_', "\\_")
         );
         let mut stmt = self.conn.prepare(
             "SELECT url, (SELECT title FROM history h2 WHERE h2.url = h.url AND h2.title != ''
@@ -522,7 +539,8 @@ impl Database {
     /// # Errors
     /// Fails on SQLite errors.
     pub fn delete_history_url(&self, url: &str) -> Result<()> {
-        self.conn.execute("DELETE FROM history WHERE url = ?1", [url])?;
+        self.conn
+            .execute("DELETE FROM history WHERE url = ?1", [url])?;
         Ok(())
     }
 
@@ -555,7 +573,8 @@ impl Database {
     /// # Errors
     /// Fails on SQLite errors.
     pub fn remove_bookmark(&self, url: &str) -> Result<()> {
-        self.conn.execute("DELETE FROM bookmarks WHERE url = ?1", [url])?;
+        self.conn
+            .execute("DELETE FROM bookmarks WHERE url = ?1", [url])?;
         Ok(())
     }
 
@@ -770,7 +789,12 @@ impl Database {
     ///
     /// # Errors
     /// Fails on SQLite errors.
-    pub fn set_permission(&self, origin: &str, permission: &str, decision: PermissionDecision) -> Result<()> {
+    pub fn set_permission(
+        &self,
+        origin: &str,
+        permission: &str,
+        decision: PermissionDecision,
+    ) -> Result<()> {
         self.conn.execute(
             "INSERT INTO site_permissions (origin, permission, decision) VALUES (?1, ?2, ?3)
              ON CONFLICT(origin, permission) DO UPDATE SET decision = excluded.decision",
@@ -837,7 +861,12 @@ impl Database {
             "UPDATE downloads SET state = ?3, finished_at = ?4, path = COALESCE(?2, path)
              WHERE id = (SELECT id FROM downloads WHERE url = ?1 AND state = 'in_progress'
                          ORDER BY started_at DESC LIMIT 1)",
-            params![url, path, if success { "completed" } else { "failed" }, now_ms()],
+            params![
+                url,
+                path,
+                if success { "completed" } else { "failed" },
+                now_ms()
+            ],
         )?;
         Ok(())
     }
@@ -886,18 +915,40 @@ mod tests {
         let a = ws.spaces()[0].id;
         let b = ws.spaces()[1].id;
         let t1 = ws
-            .open_tab(a, Tab::new("https://one.test"), Placement::SectionEnd(Section::Unpinned), true)
+            .open_tab(
+                a,
+                Tab::new("https://one.test"),
+                Placement::SectionEnd(Section::Unpinned),
+                true,
+            )
             .expect("space");
         let t2 = ws
-            .open_tab(a, Tab::new("https://two.test"), Placement::SectionEnd(Section::Unpinned), false)
+            .open_tab(
+                a,
+                Tab::new("https://two.test"),
+                Placement::SectionEnd(Section::Unpinned),
+                false,
+            )
             .expect("space");
         let t3 = ws
-            .open_tab(a, Tab::new("https://three.test"), Placement::SectionEnd(Section::Unpinned), false)
+            .open_tab(
+                a,
+                Tab::new("https://three.test"),
+                Placement::SectionEnd(Section::Unpinned),
+                false,
+            )
             .expect("space");
-        ws.open_tab(b, Tab::new("https://work.test"), Placement::SectionEnd(Section::Unpinned), true);
+        ws.open_tab(
+            b,
+            Tab::new("https://work.test"),
+            Placement::SectionEnd(Section::Unpinned),
+            true,
+        );
         let space = ws.space_mut(a).expect("space");
         space.strip.pin(t1);
-        let group = space.strip.create_group("Reading", AccentColor::Coral, &[t2, t3]);
+        let group = space
+            .strip
+            .create_group("Reading", AccentColor::Coral, &[t2, t3]);
         space.strip.set_group_collapsed(group, true);
         ws.add_favorite("https://fav.test", "Fav", None);
         ws.switch_space(b);
@@ -943,7 +994,8 @@ mod tests {
     fn history_is_searchable_and_aggregated() {
         let db = Database::open_in_memory().expect("db");
         db.record_visit("https://gpui.rs/", "").expect("visit");
-        db.update_history_title("https://gpui.rs/", "GPUI").expect("title");
+        db.update_history_title("https://gpui.rs/", "GPUI")
+            .expect("title");
         db.record_visit("https://gpui.rs/", "GPUI").expect("visit");
         db.record_visit("https://zed.dev/", "Zed").expect("visit");
         let results = db.search_history("gpui", 10).expect("search");
@@ -976,11 +1028,17 @@ mod tests {
             url: "https://gpui.rs".into(),
         });
         conv.messages.push(user);
-        conv.messages.push(ChatMessage::new(Role::Assistant, "It is a UI framework."));
-        conv.scope = ConversationScope::Tabs { tabs: vec![TabId::new()] };
+        conv.messages
+            .push(ChatMessage::new(Role::Assistant, "It is a UI framework."));
+        conv.scope = ConversationScope::Tabs {
+            tabs: vec![TabId::new()],
+        };
         conv.retitle_from_first_message();
         db.save_conversation(&conv).expect("save");
-        let loaded = db.load_conversation(conv.id).expect("load").expect("exists");
+        let loaded = db
+            .load_conversation(conv.id)
+            .expect("load")
+            .expect("exists");
         assert_eq!(loaded, conv);
         let list = db.list_conversations(10).expect("list");
         assert_eq!(list[0].message_count, 2);
@@ -997,11 +1055,18 @@ mod tests {
             db.permission("https://meet.test", "camera").expect("get"),
             Some(PermissionDecision::Allow)
         );
-        db.clear_permission("https://meet.test", "camera").expect("clear");
-        assert!(db.permission("https://meet.test", "camera").expect("get").is_none());
+        db.clear_permission("https://meet.test", "camera")
+            .expect("clear");
+        assert!(
+            db.permission("https://meet.test", "camera")
+                .expect("get")
+                .is_none()
+        );
 
-        db.start_download("https://a.test/f.zip", Some("/tmp/f.zip")).expect("start");
-        db.finish_download("https://a.test/f.zip", None, true).expect("finish");
+        db.start_download("https://a.test/f.zip", Some("/tmp/f.zip"))
+            .expect("start");
+        db.finish_download("https://a.test/f.zip", None, true)
+            .expect("finish");
         let downloads = db.downloads(10).expect("list");
         assert_eq!(downloads[0].state, "completed");
         assert_eq!(downloads[0].path.as_deref(), Some("/tmp/f.zip"));

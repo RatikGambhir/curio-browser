@@ -187,6 +187,22 @@ pub fn bind_keys(overrides: &BTreeMap<String, String>, cx: &mut App) {
             Err(error) => tracing::warn!(keystroke = %key, %error, "ignoring invalid shortcut"),
         }
     }
+    // Text inputs bind ⌘F/⌘G to their own search. In a browser those keys
+    // mean "find in page", so Curio's bindings also apply inside inputs.
+    let input_context = gpui_kit::KeyBindingContextPredicate::parse("Input")
+        .ok()
+        .map(std::rc::Rc::new);
+    for (key, action) in effective_bindings(overrides) {
+        let name = action.name();
+        if matches!(
+            name,
+            "curio::FindInPage" | "curio::FindNext" | "curio::FindPrevious"
+        ) && let Ok(binding) =
+            KeyBinding::load(&key, action, input_context.clone(), false, None, cx)
+        {
+            bindings.push(binding);
+        }
+    }
     cx.bind_keys(bindings);
 }
 
@@ -212,7 +228,11 @@ pub fn bridge_keystroke(key: &str) -> Option<String> {
         let (last, rest) = parts.split_last()?;
         (rest, *last)
     };
-    let secondary = if cfg!(target_os = "macos") { "cmd" } else { "ctrl" };
+    let secondary = if cfg!(target_os = "macos") {
+        "cmd"
+    } else {
+        "ctrl"
+    };
     let mut ctrl = false;
     let mut alt = false;
     let mut shift = false;
@@ -374,8 +394,16 @@ mod tests {
 
     #[test]
     fn bridge_keystrokes_use_canonical_order() {
-        let cmd = if cfg!(target_os = "macos") { "cmd-" } else { "" };
-        let ctrl = if cfg!(target_os = "macos") { "" } else { "ctrl-" };
+        let cmd = if cfg!(target_os = "macos") {
+            "cmd-"
+        } else {
+            ""
+        };
+        let ctrl = if cfg!(target_os = "macos") {
+            ""
+        } else {
+            "ctrl-"
+        };
         assert_eq!(
             bridge_keystroke("shift-secondary-t").as_deref(),
             Some(format!("{ctrl}shift-{cmd}t").as_str())
@@ -394,7 +422,11 @@ mod tests {
         overrides.insert("curio::NewTab".to_owned(), "secondary-n".to_owned());
         overrides.insert("curio::Print".to_owned(), String::new());
         let bindings = effective_bindings(&overrides);
-        assert!(bindings.iter().any(|(k, a)| k == "secondary-n" && a.name() == "curio::NewTab"));
+        assert!(
+            bindings
+                .iter()
+                .any(|(k, a)| k == "secondary-n" && a.name() == "curio::NewTab")
+        );
         assert!(!bindings.iter().any(|(_, a)| a.name() == "curio::Print"));
     }
 

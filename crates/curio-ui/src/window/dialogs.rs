@@ -3,17 +3,17 @@
 use curio_core::{AccentColor, GroupId, SpaceId, display_host};
 use curio_spaces::SPACE_ICONS;
 use curio_storage::HistoryEntry;
+use gpui_kit::Focusable as _;
+use gpui_kit::assets::IconName;
 use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::{Icon, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
-use gpui_kit::assets::IconName;
-use gpui_kit::Focusable as _;
 use gpui_kit::{
-    AnyElement, AppContext as _, Context, Entity, FontWeight,
-    InteractiveElement as _, IntoElement, ParentElement as _, Render, SharedString,
-    StatefulInteractiveElement as _, Styled as _, Subscription, WeakEntity, Window, div, img, px,
+    AnyElement, AppContext as _, Context, Entity, FontWeight, InteractiveElement as _, IntoElement,
+    ParentElement as _, Render, SharedString, StatefulInteractiveElement as _, Styled as _,
+    Subscription, WeakEntity, Window, div, img, px,
 };
 
 use super::BrowserWindow;
@@ -30,7 +30,13 @@ struct SpaceEditor {
 }
 
 impl SpaceEditor {
-    fn new(name: &str, icon: &str, color: AccentColor, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    fn new(
+        name: &str,
+        icon: &str,
+        color: AccentColor,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let input = cx.new(|cx| {
             InputState::new(window, cx)
                 .placeholder("Space name")
@@ -62,7 +68,11 @@ impl Render for SpaceEditor {
                 .justify_center()
                 .text_size(px(16.))
                 .cursor_pointer()
-                .when(selected, |el| el.bg(theme.accent_soft).border_1().border_color(theme.accent))
+                .when(selected, |el| {
+                    el.bg(theme.accent_soft)
+                        .border_1()
+                        .border_color(theme.accent)
+                })
                 .when(!selected, |el| el.hover(|s| s.bg(theme.row_hover)))
                 .child(SharedString::from(*icon))
                 .on_click(cx.listener(move |this, _, _, cx| {
@@ -79,7 +89,11 @@ impl Render for SpaceEditor {
                 .bg(CurioTheme::swatch(color))
                 .cursor_pointer()
                 .border_2()
-                .border_color(if selected { theme.text } else { gpui_kit::transparent_black() })
+                .border_color(if selected {
+                    theme.text
+                } else {
+                    gpui_kit::transparent_black()
+                })
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.color = color;
                     cx.notify();
@@ -97,7 +111,11 @@ impl Render for SpaceEditor {
                         gpui_kit::linear_color_stop(preview.chrome_top, 0.),
                         gpui_kit::linear_color_stop(preview.chrome_bottom, 1.),
                     ))
-                    .child(div().text_size(px(22.)).child(SharedString::from(self.icon.clone())))
+                    .child(
+                        div()
+                            .text_size(px(22.))
+                            .child(SharedString::from(self.icon.clone())),
+                    )
                     .child(
                         div()
                             .flex_1()
@@ -105,7 +123,11 @@ impl Render for SpaceEditor {
                             .text_color(preview.text)
                             .child(SharedString::from({
                                 let name = self.name.read(cx).value().to_string();
-                                if name.trim().is_empty() { "New Space".to_owned() } else { name }
+                                if name.trim().is_empty() {
+                                    "New Space".to_owned()
+                                } else {
+                                    name
+                                }
                             })),
                     ),
             )
@@ -130,7 +152,12 @@ impl Render for RenameField {
 
 impl BrowserWindow {
     /// Opens the space editor; `None` creates a new space.
-    pub(crate) fn edit_space(&mut self, space: Option<SpaceId>, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn edit_space(
+        &mut self,
+        space: Option<SpaceId>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let (name, icon, color) = match space.and_then(|id| self.workspace.space(id)) {
             Some(space) => (space.name.clone(), space.icon.clone(), space.color),
             None => {
@@ -139,14 +166,22 @@ impl BrowserWindow {
                     .spaces()
                     .last()
                     .map_or(AccentColor::Iris, |s| s.color.next());
-                (String::new(), SPACE_ICONS[(self.workspace.spaces().len() + 3) % SPACE_ICONS.len()].to_owned(), color)
+                (
+                    String::new(),
+                    SPACE_ICONS[(self.workspace.spaces().len() + 3) % SPACE_ICONS.len()].to_owned(),
+                    color,
+                )
             }
         };
         let editor = cx.new(|cx| SpaceEditor::new(&name, &icon, color, window, cx));
         let focus = editor.read(cx).name.read(cx).focus_handle(cx);
         window.focus(&focus, cx);
         let this = cx.entity().downgrade();
-        let title = if space.is_some() { "Edit Space" } else { "New Space" };
+        let title = if space.is_some() {
+            "Edit Space"
+        } else {
+            "New Space"
+        };
         window.open_dialog(cx, move |dialog, _, _| {
             let save_editor = editor.clone();
             let this = this.clone();
@@ -159,15 +194,27 @@ impl BrowserWindow {
                         .w_full()
                         .justify_end()
                         .gap(px(8.))
-                        .child(Button::new("space-cancel").label("Cancel").on_click(|_, window, cx| window.close_dialog(cx)))
+                        .child(
+                            Button::new("space-cancel")
+                                .label("Cancel")
+                                .on_click(|_, window, cx| window.close_dialog(cx)),
+                        )
                         .child(
                             Button::new("space-save")
                                 .primary()
-                                .label(if space.is_some() { "Save" } else { "Create Space" })
+                                .label(if space.is_some() {
+                                    "Save"
+                                } else {
+                                    "Create Space"
+                                })
                                 .on_click(move |_, window, cx| {
                                     let editor = save_editor.read(cx);
                                     let name = editor.name.read(cx).value().trim().to_owned();
-                                    let name = if name.is_empty() { "New Space".to_owned() } else { name };
+                                    let name = if name.is_empty() {
+                                        "New Space".to_owned()
+                                    } else {
+                                        name
+                                    };
                                     let (icon, color) = (editor.icon.clone(), editor.color);
                                     let _ = this.update(cx, |this, cx| {
                                         this.save_space(space, &name, &icon, color, window, cx);
@@ -214,7 +261,12 @@ impl BrowserWindow {
         }
     }
 
-    pub(crate) fn confirm_delete_space(&mut self, space: SpaceId, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn confirm_delete_space(
+        &mut self,
+        space: SpaceId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.workspace.spaces().len() <= 1 {
             window.push_notification("Curio needs at least one space.", cx);
             return;
@@ -252,19 +304,34 @@ impl BrowserWindow {
         }
     }
 
-    pub(crate) fn rename_group(&mut self, space: SpaceId, group: GroupId, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn rename_group(
+        &mut self,
+        space: SpaceId,
+        group: GroupId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let current = self
             .workspace
             .space(space)
             .and_then(|s| s.strip.group(group))
             .map(|g| g.name.clone())
             .unwrap_or_default();
-        let input = cx.new(|cx| InputState::new(window, cx).placeholder("Group name").default_value(current));
-        let field = cx.new(|_| RenameField { input: input.clone() });
+        let input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("Group name")
+                .default_value(current)
+        });
+        let field = cx.new(|_| RenameField {
+            input: input.clone(),
+        });
         let focus = input.read(cx).focus_handle(cx);
         window.focus(&focus, cx);
         let this = cx.entity().downgrade();
-        let save = move |window: &mut Window, cx: &mut gpui_kit::App, input: &Entity<InputState>, this: &WeakEntity<BrowserWindow>| {
+        let save = move |window: &mut Window,
+                         cx: &mut gpui_kit::App,
+                         input: &Entity<InputState>,
+                         this: &WeakEntity<BrowserWindow>| {
             let name = input.read(cx).value().to_string();
             let _ = this.update(cx, |this, cx| {
                 if let Some(space) = this.workspace.space_mut(space) {
@@ -277,11 +344,15 @@ impl BrowserWindow {
         };
         let enter_input = input.clone();
         let enter_this = this.clone();
-        let subscription = cx.subscribe_in(&input, window, move |_, _, event: &InputEvent, window, cx| {
-            if matches!(event, InputEvent::PressEnter { .. }) {
-                save(window, cx, &enter_input, &enter_this);
-            }
-        });
+        let subscription = cx.subscribe_in(
+            &input,
+            window,
+            move |_, _, event: &InputEvent, window, cx| {
+                if matches!(event, InputEvent::PressEnter { .. }) {
+                    save(window, cx, &enter_input, &enter_this);
+                }
+            },
+        );
         // The subscription lives as long as the dialog may be open.
         self._subscriptions.push(subscription);
         window.open_dialog(cx, move |dialog, _, _| {
@@ -296,23 +367,41 @@ impl BrowserWindow {
                         .w_full()
                         .justify_end()
                         .gap(px(8.))
-                        .child(Button::new("rename-cancel").label("Cancel").on_click(|_, window, cx| window.close_dialog(cx)))
-                        .child(Button::new("rename-save").primary().label("Rename").on_click(move |_, window, cx| {
-                            save(window, cx, &input, &this);
-                        })),
+                        .child(
+                            Button::new("rename-cancel")
+                                .label("Cancel")
+                                .on_click(|_, window, cx| window.close_dialog(cx)),
+                        )
+                        .child(
+                            Button::new("rename-save")
+                                .primary()
+                                .label("Rename")
+                                .on_click(move |_, window, cx| {
+                                    save(window, cx, &input, &this);
+                                }),
+                        ),
                 )
         });
     }
 
     /// Asks before opening a link in another application.
-    pub(crate) fn confirm_external_open(&mut self, url: &str, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn confirm_external_open(
+        &mut self,
+        url: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let url = url.to_owned();
         let scheme = url.split(':').next().unwrap_or_default().to_owned();
         window.open_alert_dialog(cx, move |alert, _, _| {
             let url = url.clone();
             alert
-                .title(SharedString::from(format!("Open “{scheme}:” link in another app?")))
-                .description(SharedString::from(url.chars().take(160).collect::<String>()))
+                .title(SharedString::from(format!(
+                    "Open “{scheme}:” link in another app?"
+                )))
+                .description(SharedString::from(
+                    url.chars().take(160).collect::<String>(),
+                ))
                 .confirm()
                 .ok_text("Open")
                 .on_ok(move |_, _, cx| {
@@ -375,7 +464,9 @@ impl BrowserWindow {
 
     pub(crate) fn show_history(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let storage = Services::get(cx).storage.clone();
-        let entries: Vec<HistoryEntry> = storage.with(|db| db.recent_history(300)).unwrap_or_default();
+        let entries: Vec<HistoryEntry> = storage
+            .with(|db| db.recent_history(300))
+            .unwrap_or_default();
         let this = cx.entity().downgrade();
         let theme = *CurioTheme::get(cx);
         window.open_dialog(cx, move |dialog, _, _| {
@@ -385,7 +476,11 @@ impl BrowserWindow {
                 .map(|(i, entry)| {
                     let url = entry.url.clone();
                     let this = this.clone();
-                    let title = if entry.title.is_empty() { display_host(&entry.url) } else { entry.title.clone() };
+                    let title = if entry.title.is_empty() {
+                        display_host(&entry.url)
+                    } else {
+                        entry.title.clone()
+                    };
                     h_flex()
                         .id(SharedString::from(format!("history-{i}")))
                         .h(px(40.))
@@ -400,7 +495,13 @@ impl BrowserWindow {
                                 .flex_1()
                                 .min_w_0()
                                 .child(div().text_sm().truncate().child(SharedString::from(title)))
-                                .child(div().text_xs().text_color(theme.text_faint).truncate().child(SharedString::from(entry.url.clone()))),
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(theme.text_faint)
+                                        .truncate()
+                                        .child(SharedString::from(entry.url.clone())),
+                                ),
                         )
                         .on_click(move |_, window, cx| {
                             let url = url.clone();
@@ -423,7 +524,13 @@ impl BrowserWindow {
                         .h(px(440.))
                         .overflow_y_scroll()
                         .when(empty, |el| {
-                            el.child(div().p(px(20.)).text_sm().text_color(theme.text_faint).child("No history yet."))
+                            el.child(
+                                div()
+                                    .p(px(20.))
+                                    .text_sm()
+                                    .text_color(theme.text_faint)
+                                    .child("No history yet."),
+                            )
                         })
                         .children(rows),
                 )
@@ -461,7 +568,10 @@ impl BrowserWindow {
                         .path
                         .as_deref()
                         .and_then(|p| std::path::Path::new(p).file_name())
-                        .map_or_else(|| display_host(&record.url), |n| n.to_string_lossy().into_owned());
+                        .map_or_else(
+                            || display_host(&record.url),
+                            |n| n.to_string_lossy().into_owned(),
+                        );
                     let path = record.path.clone();
                     let (icon, color, status) = match record.state.as_str() {
                         "completed" => (IconName::CircleCheck, theme.success, "Completed"),
@@ -486,7 +596,10 @@ impl BrowserWindow {
                                         .text_xs()
                                         .text_color(theme.text_faint)
                                         .truncate()
-                                        .child(SharedString::from(format!("{status} · {}", display_host(&record.url)))),
+                                        .child(SharedString::from(format!(
+                                            "{status} · {}",
+                                            display_host(&record.url)
+                                        ))),
                                 ),
                         )
                         .when_some(path, |el, path| {
@@ -496,7 +609,9 @@ impl BrowserWindow {
                                     .xsmall()
                                     .icon(IconName::FolderOpen)
                                     .tooltip("Show in Finder")
-                                    .on_click(move |_, _, cx| cx.reveal_path(std::path::Path::new(&path))),
+                                    .on_click(move |_, _, cx| {
+                                        cx.reveal_path(std::path::Path::new(&path))
+                                    }),
                             )
                         })
                         .into_any_element()
@@ -509,7 +624,13 @@ impl BrowserWindow {
                     .max_h(px(420.))
                     .overflow_y_scroll()
                     .when(empty, |el| {
-                        el.child(div().p(px(20.)).text_sm().text_color(theme.text_faint).child("No downloads yet."))
+                        el.child(
+                            div()
+                                .p(px(20.))
+                                .text_sm()
+                                .text_color(theme.text_faint)
+                                .child("No downloads yet."),
+                        )
                     })
                     .children(rows),
             )

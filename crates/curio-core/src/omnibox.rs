@@ -123,9 +123,10 @@ pub fn classify_input(input: &str, engine: &SearchEngine) -> Option<Navigation> 
                 .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'));
         // `localhost:3000` and `example.com:8080` look like `scheme:rest`
         // but are host:port pairs.
-        let is_port = rest.split('/').next().is_some_and(|p| {
-            !p.is_empty() && p.chars().all(|c| c.is_ascii_digit())
-        });
+        let is_port = rest
+            .split('/')
+            .next()
+            .is_some_and(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()));
         if looks_like_scheme && !is_port {
             if ALLOWED_SCHEMES.contains(&scheme_lower.as_str()) {
                 return match url::Url::parse(text) {
@@ -137,18 +138,19 @@ pub fn classify_input(input: &str, engine: &SearchEngine) -> Option<Navigation> 
         }
     }
 
-    let host_part = text
-        .split(['/', '?', '#'])
-        .next()
-        .unwrap_or_default();
+    let host_part = text.split(['/', '?', '#']).next().unwrap_or_default();
     let host = host_part.rsplit_once(':').map_or(host_part, |(h, port)| {
-        if port.chars().all(|c| c.is_ascii_digit()) { h } else { host_part }
+        if port.chars().all(|c| c.is_ascii_digit()) {
+            h
+        } else {
+            host_part
+        }
     });
 
     let is_local = host.eq_ignore_ascii_case("localhost")
-        || host.parse::<std::net::Ipv4Addr>().is_ok_and(|ip| {
-            ip.is_loopback() || ip.is_private() || ip.is_link_local()
-        })
+        || host
+            .parse::<std::net::Ipv4Addr>()
+            .is_ok_and(|ip| ip.is_loopback() || ip.is_private() || ip.is_link_local())
         || host.ends_with(".local")
         || host.ends_with(".test")
         || host.ends_with(".localhost");
@@ -157,10 +159,9 @@ pub fn classify_input(input: &str, engine: &SearchEngine) -> Option<Navigation> 
     let is_domain = host.contains('.')
         && !host.starts_with('.')
         && !host.ends_with('.')
-        && host
-            .split('.')
-            .last()
-            .is_some_and(|tld| tld.len() >= 2 && tld.chars().all(|c| c.is_ascii_alphabetic() || c == '-'))
+        && host.split('.').last().is_some_and(|tld| {
+            tld.len() >= 2 && tld.chars().all(|c| c.is_ascii_alphabetic() || c == '-')
+        })
         && host
             .chars()
             .all(|c| c.is_alphanumeric() || matches!(c, '.' | '-' | '_'));
@@ -204,10 +205,7 @@ mod tests {
             nav("rust-lang.org/learn"),
             Navigation::Url("https://rust-lang.org/learn".into())
         );
-        assert_eq!(
-            nav("docs.rs"),
-            Navigation::Url("https://docs.rs/".into())
-        );
+        assert_eq!(nav("docs.rs"), Navigation::Url("https://docs.rs/".into()));
     }
 
     #[test]
@@ -234,7 +232,10 @@ mod tests {
 
     #[test]
     fn dangerous_schemes_are_searched_not_executed() {
-        assert!(matches!(nav("javascript:alert(1)"), Navigation::Search { .. }));
+        assert!(matches!(
+            nav("javascript:alert(1)"),
+            Navigation::Search { .. }
+        ));
         assert!(matches!(nav("vbscript:foo"), Navigation::Search { .. }));
     }
 
@@ -248,6 +249,9 @@ mod tests {
     #[test]
     fn custom_engine_template_is_used() {
         let engine = SearchEngine::Custom("https://search.example/?q=%s&src=curio".into());
-        assert_eq!(engine.search_url("a b"), "https://search.example/?q=a%20b&src=curio");
+        assert_eq!(
+            engine.search_url("a b"),
+            "https://search.example/?q=a%20b&src=curio"
+        );
     }
 }

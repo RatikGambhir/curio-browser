@@ -30,7 +30,10 @@ pub struct SecretStore {
 const ENV_VARS: [(AiProviderKind, &str); 3] = [
     (AiProviderKind::Anthropic, "ANTHROPIC_API_KEY"),
     (AiProviderKind::OpenAi, "OPENAI_API_KEY"),
-    (AiProviderKind::OpenAiCompatible, "CURIO_OPENAI_COMPATIBLE_API_KEY"),
+    (
+        AiProviderKind::OpenAiCompatible,
+        "CURIO_OPENAI_COMPATIBLE_API_KEY",
+    ),
 ];
 
 impl SecretStore {
@@ -58,7 +61,8 @@ impl SecretStore {
     /// Whether a key is stored (not counting environment variables).
     #[must_use]
     pub fn has_stored_key(&self, kind: AiProviderKind) -> bool {
-        self.get(kind.keychain_account()).is_some_and(|k| !k.is_empty())
+        self.get(kind.keychain_account())
+            .is_some_and(|k| !k.is_empty())
     }
 
     /// Stores a key; an empty value deletes it.

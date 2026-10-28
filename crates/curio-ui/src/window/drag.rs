@@ -1,9 +1,11 @@
 //! Drag-and-drop payloads for tabs and groups, with their drag previews.
 
 use curio_core::{GroupId, SpaceId, TabId};
-use gpui_kit::component::{Icon, Sizable as _, h_flex};
 use gpui_kit::assets::IconName;
-use gpui_kit::{Context, IntoElement, ParentElement as _, Render, SharedString, Styled as _, Window, div, px};
+use gpui_kit::component::{Icon, Sizable as _, h_flex};
+use gpui_kit::{
+    Context, IntoElement, ParentElement as _, Render, SharedString, Styled as _, Window, div, px,
+};
 
 use crate::components::favicon;
 use crate::theme::CurioTheme;

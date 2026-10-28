@@ -21,6 +21,8 @@ curio-ai.workspace = true
 curio-ui.workspace = true
 gpui-kit.workspace = true
 anyhow.workspace = true
+async-channel.workspace = true
+reqwest_client = { package = "gpui-pre-reqwest-client", version = "=0.3.10" }
 tracing.workspace = true
 tracing-subscriber.workspace = true
 

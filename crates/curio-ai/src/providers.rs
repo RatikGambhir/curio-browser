@@ -221,7 +221,9 @@ impl OpenAiStream {
             None
         } else {
             self.done = true;
-            Some(StreamEvent::Done(self.stop.take().unwrap_or(StopReason::EndTurn)))
+            Some(StreamEvent::Done(
+                self.stop.take().unwrap_or(StopReason::EndTurn),
+            ))
         }
     }
 }
@@ -343,7 +345,10 @@ mod tests {
             msg(Role::Assistant, "  "),
             msg(Role::Assistant, "c"),
         ]);
-        assert_eq!(normalized, vec![msg(Role::User, "a\n\nb"), msg(Role::Assistant, "c")]);
+        assert_eq!(
+            normalized,
+            vec![msg(Role::User, "a\n\nb"), msg(Role::Assistant, "c")]
+        );
     }
 
     #[test]
@@ -363,9 +368,18 @@ mod tests {
 
     #[test]
     fn fallbacks_only_for_first_party_supported_models() {
-        assert!(anthropic_uses_fallbacks("https://api.anthropic.com", "claude-opus-5-5"));
-        assert!(!anthropic_uses_fallbacks("https://api.anthropic.com", "claude-haiku-5-5"));
-        assert!(!anthropic_uses_fallbacks("https://proxy.example", "claude-opus-5-5"));
+        assert!(anthropic_uses_fallbacks(
+            "https://api.anthropic.com",
+            "claude-opus-5-5"
+        ));
+        assert!(!anthropic_uses_fallbacks(
+            "https://api.anthropic.com",
+            "claude-haiku-5-5"
+        ));
+        assert!(!anthropic_uses_fallbacks(
+            "https://proxy.example",
+            "claude-opus-5-5"
+        ));
     }
 
     #[test]
@@ -374,11 +388,26 @@ mod tests {
         let mut events = Vec::new();
         for (name, data) in [
             ("message_start", r#"{"type":"message_start","message":{}}"#),
-            ("content_block_start", r#"{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}"#),
-            ("content_block_start", r#"{"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}"#),
-            ("content_block_delta", r#"{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Hel"}}"#),
-            ("content_block_delta", r#"{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"lo"}}"#),
-            ("message_delta", r#"{"type":"message_delta","delta":{"stop_reason":"max_tokens"}}"#),
+            (
+                "content_block_start",
+                r#"{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}"#,
+            ),
+            (
+                "content_block_start",
+                r#"{"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}"#,
+            ),
+            (
+                "content_block_delta",
+                r#"{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Hel"}}"#,
+            ),
+            (
+                "content_block_delta",
+                r#"{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"lo"}}"#,
+            ),
+            (
+                "message_delta",
+                r#"{"type":"message_delta","delta":{"stop_reason":"max_tokens"}}"#,
+            ),
             ("message_stop", r#"{"type":"message_stop"}"#),
         ] {
             events.extend(stream.handle(&sse(name, data)));
@@ -401,7 +430,10 @@ mod tests {
             "error",
             r#"{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}"#,
         ));
-        assert_eq!(events, vec![StreamEvent::Error(AiError::Overloaded("Overloaded".into()))]);
+        assert_eq!(
+            events,
+            vec![StreamEvent::Error(AiError::Overloaded("Overloaded".into()))]
+        );
     }
 
     #[test]
@@ -418,7 +450,10 @@ mod tests {
         }
         assert_eq!(
             events,
-            vec![StreamEvent::Text("Hi".into()), StreamEvent::Done(StopReason::EndTurn)]
+            vec![
+                StreamEvent::Text("Hi".into()),
+                StreamEvent::Done(StopReason::EndTurn)
+            ]
         );
         assert!(stream.finish().is_none());
     }
@@ -440,10 +475,19 @@ mod tests {
             http_error(401, r#"{"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}"#),
             AiError::Unauthorized(m) if m == "invalid x-api-key"
         ));
-        assert!(matches!(http_error(429, "slow down"), AiError::RateLimited(_)));
         assert!(matches!(
-            http_error(404, r#"{"error":{"type":"not_found_error","message":"model: x"}}"#),
-            AiError::Api { status: Some(404), .. }
+            http_error(429, "slow down"),
+            AiError::RateLimited(_)
+        ));
+        assert!(matches!(
+            http_error(
+                404,
+                r#"{"error":{"type":"not_found_error","message":"model: x"}}"#
+            ),
+            AiError::Api {
+                status: Some(404),
+                ..
+            }
         ));
     }
 }
