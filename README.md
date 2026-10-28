@@ -174,14 +174,13 @@ cargo fmt --all
 
 CI builds, tests and bundles Curio on an Apple Silicon macOS runner for every push (`.github/workflows/ci.yml`) and uploads `Curio.app` as an artifact.
 
-The project also compiles on Linux (X11, WebKitGTK) for development and automated UI testing, but Curio targets macOS and Linux isn't a supported platform.
-
 ## Known limitations
 
 - **Engine:** WebKit, not Chromium (see above). No browser extensions.
 - **Permissions:** camera, microphone and location prompts are WebKit's own per-site prompts. Curio doesn't yet have a settings page listing every per-site decision.
 - **Page load errors:** WKWebView's provisional-navigation failures aren't exposed by the embedding layer. Curio detects a stalled load after 30 seconds and offers a retry, but doesn't yet show a custom error page for DNS or TLS failures.
 - **Find in page** uses an in-page highlighter, which works on almost every site but can be blocked by pages with very strict Content Security Policies.
+- **Downloads** start for any response WebKit can't display (archives, installers, and so on). A file WebKit can display, such as a PDF or an image sent with `Content-Disposition: attachment`, opens in the tab instead of downloading.
 - **Shortcut changes** apply after restarting Curio.
 - **One window:** Curio currently manages a single browser window. Spaces cover most multi-window use.
 - **Private browsing** isn't implemented yet.
