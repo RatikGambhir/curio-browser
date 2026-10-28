@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  macos:
+    name: macOS (Apple Silicon)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: Check formatting
+        run: cargo fmt --all --check
+      - name: Unit tests (model, storage, AI, browser crates)
+        run: cargo test --workspace --exclude curio-app
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D clippy::correctness
+      - name: Build and bundle Curio.app
+        run: script/bundle-macos.sh --dmg
+      # Upload the disk image: artifact uploads drop file permissions, which
+      # would strip the executable bit from a bare .app bundle.
+      - name: Upload Curio.dmg
+        uses: actions/upload-artifact@v4
+        with:
+          name: Curio-macOS-arm64
+          path: dist/Curio.dmg
+          if-no-files-found: error

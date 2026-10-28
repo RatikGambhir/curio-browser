@@ -1,0 +1,34 @@
+[package]
+name = "curio-app"
+description = "The Curio web browser."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+default-run = "curio"
+
+[[bin]]
+name = "curio"
+path = "src/main.rs"
+
+[dependencies]
+curio-core.workspace = true
+curio-spaces.workspace = true
+curio-storage.workspace = true
+curio-settings.workspace = true
+curio-ai.workspace = true
+curio-ui.workspace = true
+gpui-kit.workspace = true
+anyhow.workspace = true
+async-channel.workspace = true
+reqwest_client = { package = "gpui-pre-reqwest-client", version = "=0.3.10" }
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[package.metadata.bundle]
+name = "Curio"
+identifier = "app.curio.browser"
+
+[lints]
+workspace = true
