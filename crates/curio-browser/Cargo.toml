@@ -1,5 +1,33 @@
 [package]
 name = "curio-browser"
+description = "Web engine integration for Curio: webview lifecycle, navigation, page bridge and content extraction."
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
 publish.workspace = true
+
+[dependencies]
+curio-core.workspace = true
+gpui-kit.workspace = true
+gpui-webview.workspace = true
+wry.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+url.workspace = true
+uuid.workspace = true
+async-channel.workspace = true
+tracing.workspace = true
+anyhow.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSURL", "NSURLRequest"] }
+objc2-web-kit = { version = "0.3", default-features = false, features = ["std", "objc2-app-kit", "WKWebView", "WKNavigation"] }
+
+# Development and testing on Linux only (Curio ships for macOS).
+[target.'cfg(target_os = "linux")'.dependencies]
+webkit2gtk = { version = "=2.0.1", features = ["v2_38"] }
+
+[lints]
+workspace = true
