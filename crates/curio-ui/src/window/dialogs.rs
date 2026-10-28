@@ -13,11 +13,11 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, AppContext as _, Context, Entity, FontWeight, InteractiveElement as _, IntoElement,
     ParentElement as _, Render, SharedString, StatefulInteractiveElement as _, Styled as _,
-    Subscription, WeakEntity, Window, div, img, px,
+    Subscription, WeakEntity, Window, div, px,
 };
 
 use super::BrowserWindow;
-use crate::components::favicon;
+use crate::components::{favicon, logo_mark};
 use crate::theme::CurioTheme;
 use crate::{Services, settings_view};
 
@@ -419,7 +419,7 @@ impl BrowserWindow {
                     .items_center()
                     .gap(px(10.))
                     .py(px(8.))
-                    .child(img(crate::assets::LOGO).size(px(88.)))
+                    .child(logo_mark(px(88.)))
                     .child(div().text_size(px(22.)).font_weight(FontWeight::BOLD).child("Curio"))
                     .child(
                         div()

@@ -172,6 +172,8 @@ cargo clippy --workspace --all-targets
 cargo fmt --all
 ```
 
+The logo and app icon are generated from `assets/brand/curio-logo-source.png` by `script/make-brand.py` (needs Pillow and NumPy), which writes the in-app logo, `Curio.icns` and the README icon.
+
 CI builds, tests and bundles Curio on an Apple Silicon macOS runner for every push (`.github/workflows/ci.yml`) and uploads `Curio.dmg` as the `Curio-macOS-arm64` artifact. The build is ad-hoc signed, not notarized, so the first time you open it, Control-click Curio.app and choose **Open**.
 
 ## Known limitations

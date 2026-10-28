@@ -4,15 +4,10 @@ use std::borrow::Cow;
 
 use gpui_kit::{AssetSource, Result, SharedString};
 
-/// The full-color app logo.
-pub const LOGO: &str = "curio/logo.svg";
-/// The single-color logo mark, tinted by the current text color.
-pub const MARK: &str = "curio/mark.svg";
+/// The full-color logo on a transparent background.
+pub const LOGO: &str = "curio/logo.png";
 
-const BRAND: [(&str, &[u8]); 2] = [
-    (LOGO, include_bytes!("../../../assets/brand/curio-logo.svg")),
-    (MARK, include_bytes!("../../../assets/brand/curio-mark.svg")),
-];
+const BRAND: [(&str, &[u8]); 1] = [(LOGO, include_bytes!("../../../assets/brand/curio-logo.png"))];
 
 /// Curio's asset source.
 pub struct CurioAssets;

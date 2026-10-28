@@ -13,12 +13,12 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     Animation, AnimationExt as _, AnyElement, Context, FontWeight, InteractiveElement as _,
     IntoElement, ParentElement as _, SharedString, StatefulInteractiveElement as _, Styled as _,
-    Window, deferred, div, img, px, relative,
+    Window, deferred, div, px, relative,
 };
 
 use super::BrowserWindow;
 use crate::actions;
-use crate::components::{favicon, shortcut_hint};
+use crate::components::{favicon, logo_mark, shortcut_hint};
 use crate::theme::{CurioTheme, metrics};
 
 impl BrowserWindow {
@@ -224,7 +224,7 @@ impl BrowserWindow {
             .gap(px(22.))
             .px(px(32.))
             .bg(theme.card)
-            .child(img(crate::assets::LOGO).size(px(72.)))
+            .child(logo_mark(px(76.)))
             .child(
                 v_flex()
                     .items_center()

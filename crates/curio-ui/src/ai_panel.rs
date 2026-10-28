@@ -575,16 +575,7 @@ impl AiPanel {
             .gap(px(8.))
             .border_b_1()
             .border_color(theme.divider)
-            .child(
-                div()
-                    .size(px(22.))
-                    .rounded(px(6.))
-                    .bg(theme.accent_soft)
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .child(logo_mark(px(16.), theme.accent_text)),
-            )
+            .child(logo_mark(px(20.)))
             .child(
                 div()
                     .flex_1()
@@ -691,16 +682,7 @@ impl AiPanel {
             .justify_center()
             .gap(px(14.))
             .px(px(24.))
-            .child(
-                div()
-                    .size(px(48.))
-                    .rounded(px(14.))
-                    .bg(theme.accent_soft)
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .child(logo_mark(px(32.), theme.accent_text)),
-            )
+            .child(logo_mark(px(52.)))
             .child(
                 div()
                     .text_lg()

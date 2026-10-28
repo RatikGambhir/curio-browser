@@ -5,7 +5,7 @@ use gpui_kit::component::{Icon, Sizable as _};
 use gpui_kit::{
     AnyElement, App, Div, FontWeight, Hsla, InteractiveElement as _, IntoElement,
     ParentElement as _, Pixels, SharedString, Stateful, StatefulInteractiveElement as _,
-    Styled as _, StyledImage as _, div, img, px, svg,
+    Styled as _, StyledImage as _, div, img, px,
 };
 
 use crate::theme::CurioTheme;
@@ -51,9 +51,9 @@ pub fn favicon(url: Option<&str>, label: &str, size: Pixels) -> AnyElement {
     }
 }
 
-/// The Curio logo mark tinted with `color`.
-pub fn logo_mark(size: Pixels, color: Hsla) -> impl IntoElement {
-    svg().path(crate::assets::MARK).size(size).text_color(color)
+/// The full-color Curio logo.
+pub fn logo_mark(size: Pixels) -> impl IntoElement {
+    img(crate::assets::LOGO).size(size)
 }
 
 /// A compact icon button for the chrome (sidebar, toolbars).
