@@ -37,11 +37,11 @@ if [[ $UNIVERSAL -eq 1 ]]; then
   cargo build --release -p curio-app --target aarch64-apple-darwin
   cargo build --release -p curio-app --target x86_64-apple-darwin
   lipo -create -output "$APP/Contents/MacOS/Curio" \
-    target/aarch64-apple-darwin/release/curio \
-    target/x86_64-apple-darwin/release/curio
+    target/aarch64-apple-darwin/release/Curio \
+    target/x86_64-apple-darwin/release/Curio
 else
   cargo build --release -p curio-app
-  cp target/release/curio "$APP/Contents/MacOS/Curio"
+  cp target/release/Curio "$APP/Contents/MacOS/Curio"
 fi
 
 cp assets/brand/Curio.icns "$APP/Contents/Resources/Curio.icns"

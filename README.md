@@ -44,7 +44,7 @@ Curio is a desktop web browser. Every piece of its own interface (sidebar, tab s
 
 - macOS 13 Ventura or later, Apple Silicon or Intel.
 - Xcode command line tools: `xcode-select --install`
-- Rust 1.88 or later (stable): https://rustup.rs
+- Rust 1.95 or later (stable): https://rustup.rs
 
 ## Build and run
 

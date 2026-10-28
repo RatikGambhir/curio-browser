@@ -6,10 +6,10 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
-default-run = "curio"
+default-run = "Curio"
 
 [[bin]]
-name = "curio"
+name = "Curio"
 path = "src/main.rs"
 
 [dependencies]
