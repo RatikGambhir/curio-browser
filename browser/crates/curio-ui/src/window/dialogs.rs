@@ -4,11 +4,10 @@ use curio_core::{AccentColor, GroupId, SpaceId, display_host};
 use curio_spaces::SPACE_ICONS;
 use curio_storage::HistoryEntry;
 use gpui_kit::Focusable as _;
-use gpui_kit::assets::IconName;
 use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
-use gpui_kit::component::{Icon, Sizable as _, h_flex, v_flex};
+use gpui_kit::component::{Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, AppContext as _, Context, Entity, FontWeight, InteractiveElement as _, IntoElement,
@@ -563,59 +562,7 @@ impl BrowserWindow {
             let rows: Vec<AnyElement> = records
                 .iter()
                 .enumerate()
-                .map(|(i, record)| {
-                    let name = record
-                        .path
-                        .as_deref()
-                        .and_then(|p| std::path::Path::new(p).file_name())
-                        .map_or_else(
-                            || display_host(&record.url),
-                            |n| n.to_string_lossy().into_owned(),
-                        );
-                    let path = record.path.clone();
-                    let (icon, color, status) = match record.state.as_str() {
-                        "completed" => (IconName::CircleCheck, theme.success, "Completed"),
-                        "failed" => (IconName::CircleX, theme.danger, "Failed"),
-                        _ => (IconName::ArrowDown, theme.accent, "Downloading…"),
-                    };
-                    h_flex()
-                        .id(SharedString::from(format!("download-{i}")))
-                        .h(px(44.))
-                        .px(px(8.))
-                        .gap(px(10.))
-                        .rounded(px(8.))
-                        .hover(|s| s.bg(theme.row_hover))
-                        .child(div().text_color(color).child(Icon::new(icon).small()))
-                        .child(
-                            v_flex()
-                                .flex_1()
-                                .min_w_0()
-                                .child(div().text_sm().truncate().child(SharedString::from(name)))
-                                .child(
-                                    div()
-                                        .text_xs()
-                                        .text_color(theme.text_faint)
-                                        .truncate()
-                                        .child(SharedString::from(format!(
-                                            "{status} · {}",
-                                            display_host(&record.url)
-                                        ))),
-                                ),
-                        )
-                        .when_some(path, |el, path| {
-                            el.child(
-                                Button::new(SharedString::from(format!("reveal-{i}")))
-                                    .ghost()
-                                    .xsmall()
-                                    .icon(IconName::FolderOpen)
-                                    .tooltip("Show in Finder")
-                                    .on_click(move |_, _, cx| {
-                                        cx.reveal_path(std::path::Path::new(&path))
-                                    }),
-                            )
-                        })
-                        .into_any_element()
-                })
+                .map(|(i, record)| super::library::download_row(i, record, &theme))
                 .collect();
             let empty = rows.is_empty();
             dialog.title("Downloads").w(px(520.)).child(

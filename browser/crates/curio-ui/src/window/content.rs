@@ -132,7 +132,9 @@ impl BrowserWindow {
             .pb(metrics::PANEL_GAP)
             .when(!self.ai_open, |el| el.pr(metrics::PANEL_GAP))
             .when(card_top, |el| el.pt(metrics::PANEL_GAP))
-            .when(!self.sidebar_visible(cx), |el| el.pl(metrics::PANEL_GAP))
+            .when(!self.left_column_visible(cx), |el| {
+                el.pl(metrics::PANEL_GAP)
+            })
             .child(card)
             .into_any_element()
     }

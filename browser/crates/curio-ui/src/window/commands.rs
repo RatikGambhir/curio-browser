@@ -202,10 +202,14 @@ impl BrowserWindow {
                     return;
                 }
                 this.sidebar_peek = false;
+                this.library.open = false;
                 crate::update_settings(cx, |s| {
                     s.appearance.sidebar_visible = !s.appearance.sidebar_visible
                 });
             }))
+            .on_action(
+                cx.listener(|this, _: &ToggleLibrary, window, cx| this.toggle_library(window, cx)),
+            )
             .on_action(cx.listener(|_, _: &ToggleTabLayout, _, cx| {
                 crate::update_settings(cx, |s| {
                     s.appearance.tab_layout = match s.appearance.tab_layout {
@@ -298,6 +302,8 @@ impl BrowserWindow {
             self.close_command_bar(window, cx);
         } else if self.find.open {
             self.close_find(window, cx);
+        } else if self.library.open {
+            self.close_library(window, cx);
         } else if self.sidebar_peek {
             self.sidebar_peek = false;
             cx.notify();

@@ -94,6 +94,7 @@ const COMMANDS: &[(&str, &str, IconName)] = &[
         "Toggle Sidebar",
         IconName::PanelLeft,
     ),
+    ("curio::ToggleLibrary", "Open Library", IconName::LibraryBig),
     (
         "curio::ToggleTabLayout",
         "Switch Vertical / Horizontal Tabs",

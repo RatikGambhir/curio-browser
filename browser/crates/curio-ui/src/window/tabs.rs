@@ -234,6 +234,24 @@ impl BrowserWindow {
         }
     }
 
+    /// Reopens a tab from the library's archive and returns to the sidebar.
+    pub(crate) fn reopen_archived_tab(
+        &mut self,
+        id: TabId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let previous_space = self.workspace.active_space_id();
+        if self.workspace.reopen_closed(id).is_some() {
+            if self.workspace.active_space_id() != previous_space {
+                self.after_space_change(previous_space, window, cx);
+            }
+            self.sync_active_tab(window, cx);
+            self.schedule_save(cx);
+        }
+        self.close_library(window, cx);
+    }
+
     /// Switches to another space with an animated transition.
     pub(crate) fn switch_space(
         &mut self,
@@ -429,8 +447,12 @@ impl BrowserWindow {
                 );
                 let storage = Services::get(cx).storage.clone();
                 let (u, p) = (url.clone(), path.clone());
-                cx.background_spawn(async move {
+                let write = cx.background_spawn(async move {
                     let _ = storage.with(|db| db.start_download(&u, Some(&p)));
+                });
+                cx.spawn(async move |this, cx| {
+                    write.await;
+                    let _ = this.update(cx, |this, cx| this.reload_library_downloads(cx));
                 })
                 .detach();
                 let name = std::path::Path::new(path)
@@ -453,8 +475,12 @@ impl BrowserWindow {
                 }
                 let storage = Services::get(cx).storage.clone();
                 let (u, p, ok) = (url.clone(), path.clone(), *success);
-                cx.background_spawn(async move {
+                let write = cx.background_spawn(async move {
                     let _ = storage.with(|db| db.finish_download(&u, p.as_deref(), ok));
+                });
+                cx.spawn(async move |this, cx| {
+                    write.await;
+                    let _ = this.update(cx, |this, cx| this.reload_library_downloads(cx));
                 })
                 .detach();
                 let message = if *success {

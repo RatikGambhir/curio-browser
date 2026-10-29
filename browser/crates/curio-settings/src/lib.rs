@@ -207,10 +207,13 @@ impl AiSettings {
     }
 
     /// The effective base URL for `provider`, without a trailing slash.
+    /// OpenAI and Anthropic always use their official endpoints; only
+    /// OpenAI-compatible servers take a custom address.
     #[must_use]
     pub fn base_url(&self, provider: AiProviderKind) -> String {
         self.providers
             .get(&provider)
+            .filter(|_| provider == AiProviderKind::OpenAiCompatible)
             .map(|p| p.base_url.trim())
             .filter(|u| !u.is_empty())
             .unwrap_or(provider.default_base_url())

@@ -78,6 +78,7 @@ actions!(
         SelectSpace9,
         // Layout
         ToggleSidebar,
+        ToggleLibrary,
         ToggleTabLayout,
         ToggleAiPanel,
         // AI
@@ -336,6 +337,7 @@ pub fn menus() -> Vec<Menu> {
         ]),
         Menu::new("View").items([
             MenuItem::action("Toggle Sidebar", ToggleSidebar),
+            MenuItem::action("Library", ToggleLibrary),
             MenuItem::action("Toggle AI Assistant", ToggleAiPanel),
             MenuItem::action("Switch Tab Layout", ToggleTabLayout),
             MenuItem::separator(),

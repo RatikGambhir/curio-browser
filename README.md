@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/brand/curio-icon-512.png" width="128" alt="Curio">
+  <img src="browser/assets/brand/curio-icon-512.png" width="128" alt="Curio">
 </p>
 
 <h1 align="center">Curio</h1>
@@ -50,21 +50,41 @@ Curio is a desktop web browser. Every piece of its own interface (sidebar, tab s
 
 ```bash
 git clone https://github.com/RatikGambhir/curio-browser.git
-cd curio-browser
+cd curio-browser/browser
 cargo run --release
+```
+
+The repository has two independent Cargo workspaces:
+
+```
+curio-browser/
+├── browser/        The Curio app (this README's commands run from here)
+└── curio-server/   Curio's backend service (Axum)
 ```
 
 The first build compiles GPUI and its dependencies and takes several minutes.
 
-To build a standalone app bundle in `dist/Curio.app`:
+To build a standalone app bundle in `browser/dist/Curio.app` (run from `browser/`):
 
 ```bash
 script/bundle-macos.sh
 ```
 
-Add `--universal` for an Apple Silicon + Intel binary, or `--dmg` to also create `dist/Curio.dmg`. The bundle is ad-hoc signed so it runs on your Mac. To distribute it, set `CURIO_SIGN_IDENTITY` to a Developer ID certificate and notarize it.
+Add `--universal` for an Apple Silicon + Intel binary, or `--dmg` to also create `browser/dist/Curio.dmg`. The bundle is ad-hoc signed so it runs on your Mac. To distribute it, set `CURIO_SIGN_IDENTITY` to a Developer ID certificate and notarize it.
 
 To make Curio your default browser, open the bundled app once, then choose it in **System Settings › Desktop & Dock › Default web browser**.
+
+## Running the server
+
+`curio-server` is an Axum service. For now it only has a health check.
+
+```bash
+cd curio-server
+cargo run
+curl http://127.0.0.1:8080/health   # {"status":"ok","version":"0.1.0"}
+```
+
+Set `CURIO_SERVER_ADDR` to listen elsewhere (for example `0.0.0.0:8080` in a container) and `RUST_LOG` to change log levels. It stops gracefully on Ctrl-C or SIGTERM.
 
 ## Setting up the assistant
 
@@ -114,7 +134,7 @@ Every shortcut can be changed in **Settings › Shortcuts** (changes apply after
 ## Architecture
 
 ```
-crates/
+browser/crates/
 ├── curio-core      Typed IDs, tab/group/favorite and chat records, accent palette,
 │                   address-bar input classification (URL vs. search)
 ├── curio-tabs      One space's tab strip: pinned/regular sections, folders,
@@ -166,15 +186,19 @@ Set `CURIO_DATA_DIR` to use a different directory (handy for testing). Run with 
 
 ## Development
 
+From `browser/`:
+
 ```bash
 cargo test --workspace --exclude curio-app   # unit tests (no window needed)
 cargo clippy --workspace --all-targets
 cargo fmt --all
 ```
 
-The logo and app icon are generated from `assets/brand/curio-logo-source.png` by `script/make-brand.py` (needs Pillow and NumPy), which writes the in-app logo, `Curio.icns` and the README icon.
+From `curio-server/`: `cargo test`, `cargo clippy --all-targets`, `cargo fmt`.
 
-CI builds, tests and bundles Curio on an Apple Silicon macOS runner for every push (`.github/workflows/ci.yml`) and uploads `Curio.dmg` as the `Curio-macOS-arm64` artifact. The build is ad-hoc signed, not notarized, so the first time you open it, Control-click Curio.app and choose **Open**.
+The logo and app icon are generated from `browser/assets/brand/curio-logo-source.png` by `browser/script/make-brand.py` (needs Pillow and NumPy), which writes the in-app logo, `Curio.icns` and the README icon.
+
+CI builds, tests and bundles Curio on an Apple Silicon macOS runner for every push (`.github/workflows/ci.yml`), tests and lints `curio-server` on Linux, and uploads `Curio.dmg` as the `Curio-macOS-arm64` artifact. The build is ad-hoc signed, not notarized, so the first time you open it, Control-click Curio.app and choose **Open**.
 
 ## Known limitations
 

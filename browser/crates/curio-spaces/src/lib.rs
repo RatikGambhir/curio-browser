@@ -423,6 +423,22 @@ impl Workspace {
         None
     }
 
+    /// Reopens one closed tab in its original space and position, and
+    /// activates it.
+    pub fn reopen_closed(&mut self, id: TabId) -> Option<TabId> {
+        let index = self.closed.iter().position(|c| c.tab.id == id)?;
+        let closed = self.closed.remove(index)?;
+        self.space(closed.space)?;
+        self.open_tab(closed.space, closed.tab, closed.restore_at, true)?;
+        self.active_space = closed.space;
+        Some(id)
+    }
+
+    /// Recently closed tabs, most recent first.
+    pub fn closed_tabs(&self) -> impl Iterator<Item = &ClosedTab> {
+        self.closed.iter()
+    }
+
     /// Number of tabs that can be reopened.
     #[must_use]
     pub fn closed_tab_count(&self) -> usize {
@@ -661,6 +677,24 @@ mod tests {
         assert_eq!(ws.reopen_closed_tab(), Some(ids[1]));
         assert_eq!(ws.active_space().strip.ordered_tab_ids(), ids);
         assert_eq!(ws.active_tab_id(), Some(ids[1]));
+    }
+
+    #[test]
+    fn reopen_a_specific_closed_tab() {
+        let (mut ws, _, b, ids) = workspace_with_tabs();
+        ws.switch_space(b);
+        ws.close_tab(ids[0]).expect("tab exists");
+        ws.close_tab(ids[2]).expect("tab exists");
+        let closed: Vec<TabId> = ws.closed_tabs().map(|c| c.tab.id).collect();
+        assert_eq!(closed, vec![ids[2], ids[0]]);
+        assert_eq!(ws.reopen_closed(ids[0]), Some(ids[0]));
+        assert_eq!(ws.active_tab_id(), Some(ids[0]));
+        assert_eq!(
+            ws.active_space().strip.ordered_tab_ids(),
+            vec![ids[0], ids[1]]
+        );
+        assert_eq!(ws.closed_tab_count(), 1);
+        assert_eq!(ws.reopen_closed(ids[0]), None);
     }
 
     #[test]

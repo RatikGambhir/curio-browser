@@ -819,11 +819,15 @@ impl BrowserWindow {
             .border_t_1()
             .border_color(theme.divider)
             .child(
-                chrome_button("downloads", IconName::ArrowRight, cx)
+                chrome_button("library", IconName::ArrowRight, cx)
                     .when(downloads_active, |el| el.text_color(theme.accent_text))
-                    .tooltip(|w, cx| Tooltip::new("Downloads").build(w, cx))
+                    .tooltip(|w, cx| {
+                        Tooltip::new("Library")
+                            .action(&actions::ToggleLibrary, None)
+                            .build(w, cx)
+                    })
                     .on_click(|_, window, cx| {
-                        window.dispatch_action(Box::new(actions::ShowDownloads), cx)
+                        window.dispatch_action(Box::new(actions::ToggleLibrary), cx)
                     }),
             )
             .child(

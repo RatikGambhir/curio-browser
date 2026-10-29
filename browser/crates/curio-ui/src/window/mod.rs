@@ -9,6 +9,7 @@ mod commands;
 mod content;
 mod dialogs;
 mod drag;
+mod library;
 mod sidebar;
 mod tabs;
 mod toolbar;
@@ -36,6 +37,7 @@ use crate::theme::{Appearance, CurioTheme, metrics, mix};
 use crate::{Services, actions, settings};
 
 pub(crate) use drag::{DraggedGroup, DraggedTab};
+use library::Library;
 
 /// Which divider is being dragged.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,6 +75,8 @@ pub struct BrowserWindow {
     pub(crate) ai_panel: Entity<AiPanel>,
     pub(crate) ai_open: bool,
     pub(crate) find: FindState,
+    /// The Arc-style library, shown in place of the sidebar.
+    pub(crate) library: Library,
     pub(crate) sidebar_width: Pixels,
     pub(crate) ai_width: Pixels,
     resizing: Option<Resize>,
@@ -115,6 +119,7 @@ impl BrowserWindow {
         let command_bar = cx.new(|cx| CommandBar::new(window, cx));
         let ai_panel = cx.new(|cx| AiPanel::new(window, cx));
         let find_input = cx.new(|cx| InputState::new(window, cx).placeholder("Find in page"));
+        let library = Library::new(window, cx);
 
         let mut subscriptions = vec![
             cx.subscribe_in(&command_bar, window, Self::on_command_bar_event),
@@ -179,6 +184,7 @@ impl BrowserWindow {
                 result: FindResult::default(),
                 task: Task::ready(()),
             },
+            library,
             sidebar_width: px(settings.appearance.sidebar_width),
             ai_width: px(settings.appearance.ai_panel_width),
             resizing: None,
@@ -219,6 +225,11 @@ impl BrowserWindow {
 
     pub(crate) fn sidebar_visible(&self, cx: &gpui_kit::App) -> bool {
         self.layout(cx) == TabLayout::Vertical && settings(cx).appearance.sidebar_visible
+    }
+
+    /// Whether a column (the sidebar or the library) sits left of the page.
+    pub(crate) fn left_column_visible(&self, cx: &gpui_kit::App) -> bool {
+        self.library.open || self.sidebar_visible(cx)
     }
 
     /// Re-applies the theme for the active space and appearance setting.
@@ -495,6 +506,7 @@ impl Render for BrowserWindow {
         let previous = self.previous_theme;
         let layout = self.layout(cx);
         let sidebar_visible = self.sidebar_visible(cx);
+        let left_column = self.left_column_visible(cx);
         let reduce_motion = settings(cx).appearance.reduce_motion;
 
         let mut main = gpui_kit::component::v_flex().flex_1().min_w_0().h_full();
@@ -502,14 +514,18 @@ impl Render for BrowserWindow {
             main = main
                 .child(self.render_toolbar(true, window, cx))
                 .child(self.render_tab_strip(window, cx));
-        } else if !sidebar_visible {
+        } else if !left_column {
             main = main.child(self.render_toolbar(false, window, cx));
         }
-        let card_top = layout == TabLayout::Vertical && sidebar_visible;
+        let card_top = layout == TabLayout::Vertical && left_column;
         main = main.child(self.render_content(card_top, window, cx));
 
         let mut row = gpui_kit::component::h_flex().size_full().items_start();
-        if sidebar_visible {
+        if self.library.open {
+            row = row
+                .child(self.render_library(window, cx))
+                .child(div().w(px(6.)).flex_shrink_0());
+        } else if sidebar_visible {
             row = row
                 .child(
                     div()
@@ -575,7 +591,7 @@ impl Render for BrowserWindow {
             .child(row);
         root = self.register_actions(root, cx);
 
-        if self.sidebar_peek && !sidebar_visible && layout == TabLayout::Vertical {
+        if self.sidebar_peek && !left_column && layout == TabLayout::Vertical {
             root = root.child(deferred(
                 div()
                     .id("sidebar-peek")

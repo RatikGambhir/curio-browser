@@ -538,7 +538,7 @@ impl SettingsView {
                 .api_key
                 .is_some();
         let test = self.test.clone();
-        vec![
+        let mut rows = vec![
             Self::row(
                 "Provider",
                 None,
@@ -552,7 +552,7 @@ impl SettingsView {
                 cx,
             ),
             Self::row(
-                "Model",
+                "Default Model",
                 Some("Leave empty for the default, or pick a suggestion."),
                 h_flex()
                     .gap(px(6.))
@@ -581,17 +581,6 @@ impl SettingsView {
                                 menu
                             }),
                     ),
-                cx,
-            ),
-            Self::row(
-                "API base URL",
-                Some(match provider {
-                    AiProviderKind::OpenAiCompatible => {
-                        "For example Ollama (http://localhost:11434/v1) or LM Studio."
-                    }
-                    _ => "Leave empty for the official endpoint.",
-                }),
-                div().w(px(300.)).child(Input::new(&self.base_url).small()),
                 cx,
             ),
             Self::row(
@@ -696,7 +685,21 @@ impl SettingsView {
                     .child(Input::new(&self.translate_to).small()),
                 cx,
             ),
-        ]
+        ];
+        // OpenAI and Claude always use their official endpoints; only
+        // OpenAI-compatible servers need an address.
+        if provider == AiProviderKind::OpenAiCompatible {
+            rows.insert(
+                2,
+                Self::row(
+                    "API base URL",
+                    Some("For example Ollama (http://localhost:11434/v1) or LM Studio."),
+                    div().w(px(300.)).child(Input::new(&self.base_url).small()),
+                    cx,
+                ),
+            );
+        }
+        rows
     }
 
     fn render_privacy(&mut self, cx: &mut Context<Self>) -> Vec<AnyElement> {
