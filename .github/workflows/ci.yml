@@ -14,14 +14,19 @@ env:
 
 jobs:
   macos:
-    name: macOS (Apple Silicon)
+    name: Browser (macOS, Apple Silicon)
     runs-on: macos-14
+    defaults:
+      run:
+        working-directory: browser
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: browser
       - name: Check formatting
         run: cargo fmt --all --check
       - name: Unit tests (model, storage, AI, browser crates)
@@ -36,5 +41,26 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Curio-macOS-arm64
-          path: dist/Curio.dmg
+          path: browser/dist/Curio.dmg
           if-no-files-found: error
+
+  server:
+    name: Server (Linux)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: curio-server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: curio-server
+      - name: Check formatting
+        run: cargo fmt --check
+      - name: Tests
+        run: cargo test
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
