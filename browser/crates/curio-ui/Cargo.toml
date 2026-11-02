@@ -1,0 +1,24 @@
+[package]
+name = "curio-ui"
+description = "Curio's GPUI interface: sidebar, tabs, spaces, command bar, assistant and settings."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+curio-core.workspace = true
+curio-tabs.workspace = true
+curio-spaces.workspace = true
+curio-storage.workspace = true
+curio-settings.workspace = true
+curio-ai.workspace = true
+curio-browser.workspace = true
+gpui-kit.workspace = true
+wry.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

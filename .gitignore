@@ -1,0 +1,18 @@
+# Rust build output (any Cargo workspace in the repo)
+target/
+
+# App bundles and disk images from browser/script/bundle-macos.sh
+browser/dist/
+
+# macOS
+.DS_Store
+
+# Local environment files (keep the example)
+.env
+.env.*
+!.env.example
+
+# Editors
+.idea/
+.vscode/
+*.swp
