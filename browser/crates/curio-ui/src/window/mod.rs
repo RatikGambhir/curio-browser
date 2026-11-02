@@ -26,8 +26,8 @@ use curio_spaces::Workspace;
 use curio_storage::HistoryEntry;
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::{
-    Animation, AnimationExt as _, AppContext as _, Context, Entity, FocusHandle, Focusable,
-    InteractiveElement as _, IntoElement, MouseButton, MouseMoveEvent, MouseUpEvent,
+    Animation, AnimationExt as _, AnyElement, AppContext as _, Context, Entity, FocusHandle,
+    Focusable, InteractiveElement as _, IntoElement, MouseButton, MouseMoveEvent, MouseUpEvent,
     ParentElement as _, Pixels, Render, StatefulInteractiveElement as _, Styled as _, Subscription,
     Task, Window, deferred, div, linear_color_stop, linear_gradient, px,
 };
@@ -232,7 +232,7 @@ impl BrowserWindow {
 
     /// Whether a column (the sidebar or the library) sits left of the page.
     pub(crate) fn left_column_visible(&self, cx: &gpui_kit::App) -> bool {
-        self.library.open || self.sidebar_visible(cx)
+        self.library.open || self.library_animating() || self.sidebar_visible(cx)
     }
 
     /// Re-applies the theme for the active space and appearance setting.
@@ -503,12 +503,71 @@ impl BrowserWindow {
 
 use gpui_kit::prelude::FluentBuilder as _;
 
+impl BrowserWindow {
+    /// The left column mid-way between the sidebar and the library.
+    ///
+    /// The column's width follows `progress` every frame, so the page beside
+    /// it resizes smoothly (like a live window resize) instead of jumping
+    /// 84px in one frame and reflowing all at once. Both panes keep their
+    /// settled widths and are clipped, so their own contents never reflow.
+    fn render_left_column_morph(
+        &mut self,
+        progress: f32,
+        sidebar_visible: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        // The 6px after either pane: the resize handle or the library's gap.
+        let gap = px(6.);
+        let library_width = library::RAIL_WIDTH + self.sidebar_width;
+        // With the sidebar hidden, the page's own left inset stands in for it.
+        let closed_width = if sidebar_visible {
+            self.sidebar_width + gap
+        } else {
+            metrics::PANEL_GAP
+        };
+        let width = closed_width + (library_width + gap - closed_width) * progress;
+
+        let mut column = div()
+            .relative()
+            .w(width)
+            .h_full()
+            .flex_shrink_0()
+            .overflow_hidden();
+        if sidebar_visible {
+            column = column.child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .w(self.sidebar_width)
+                    .h_full()
+                    .opacity(1. - progress)
+                    .child(self.render_sidebar(false, window, cx)),
+            );
+        }
+        column
+            .child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .h_full()
+                    .opacity(progress)
+                    .child(self.render_library(window, cx)),
+            )
+            .into_any_element()
+    }
+}
+
 impl Render for BrowserWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = *CurioTheme::get(cx);
         let previous = self.previous_theme;
         let layout = self.layout(cx);
         let sidebar_visible = self.sidebar_visible(cx);
+        // Read before `left_column_visible`, since a finished morph clears here.
+        let library_progress = self.library_progress(window);
         let left_column = self.left_column_visible(cx);
         let reduce_motion = settings(cx).appearance.reduce_motion;
 
@@ -524,7 +583,14 @@ impl Render for BrowserWindow {
         main = main.child(self.render_content(vertical, window, cx));
 
         let mut row = gpui_kit::component::h_flex().size_full().items_start();
-        if self.library.open {
+        if self.library_animating() {
+            row = row.child(self.render_left_column_morph(
+                library_progress,
+                sidebar_visible,
+                window,
+                cx,
+            ));
+        } else if self.library.open {
             row = row
                 .child(self.render_library(window, cx))
                 .child(div().w(px(6.)).flex_shrink_0());

@@ -1,10 +1,12 @@
 //! The library: Arc-style collections shown in place of the sidebar. A rail
 //! of sections (media, downloads, notes, spaces, calendar, archived tabs)
-//! sits under the traffic lights, with a searchable list beside it; the page
-//! stays where it is.
+//! sits under the traffic lights, with a searchable list beside it.
+//!
+//! Opening and closing morph the left column: it widens or narrows to fit,
+//! while the sidebar and the library cross-fade inside it.
 
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use curio_core::display_host;
 use curio_storage::DownloadRecord;
@@ -14,10 +16,9 @@ use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::{Icon, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    Animation, AnimationExt as _, AnyElement, AppContext as _, Context, Entity, FontWeight,
-    InteractiveElement as _, IntoElement, ObjectFit, ParentElement as _, Pixels, SharedString,
-    StatefulInteractiveElement as _, Styled as _, StyledImage as _, Subscription, Window, div, img,
-    px,
+    AnyElement, AppContext as _, Context, Entity, FontWeight, InteractiveElement as _, IntoElement,
+    ObjectFit, ParentElement as _, Pixels, SharedString, StatefulInteractiveElement as _,
+    Styled as _, StyledImage as _, Subscription, Window, div, img, px,
 };
 
 use super::BrowserWindow;
@@ -26,7 +27,10 @@ use crate::theme::{CurioTheme, metrics};
 use crate::{Services, actions, settings};
 
 /// Width of the section rail. Wide enough for the traffic lights above it.
-const RAIL_WIDTH: Pixels = px(84.);
+pub(crate) const RAIL_WIDTH: Pixels = px(84.);
+
+/// How long the sidebar ⇄ library morph takes.
+const TRANSITION: Duration = Duration::from_millis(280);
 
 /// File extensions shown under Media.
 const IMAGE_EXTENSIONS: [&str; 8] = ["png", "jpg", "jpeg", "gif", "webp", "heic", "svg", "bmp"];
@@ -117,9 +121,55 @@ pub(crate) struct Library {
     section: LibrarySection,
     search: Entity<InputState>,
     downloads: Vec<DownloadRecord>,
-    /// Bumped on every open to replay the slide-in.
-    opened: usize,
+    /// The sidebar ⇄ library morph in flight, if any.
+    transition: Option<Transition>,
     _search_changed: Subscription,
+}
+
+/// A morph between the sidebar (0.0) and the library (1.0), heading
+/// towards whichever `Library::open` says.
+#[derive(Debug, Clone, Copy)]
+struct Transition {
+    started: Instant,
+    /// Where the morph started, so reversing it mid-way doesn't jump.
+    from: f32,
+}
+
+impl Library {
+    fn target(&self) -> f32 {
+        if self.open { 1.0 } else { 0.0 }
+    }
+
+    /// How far the left column is towards the library right now, or `None`
+    /// once the morph has finished.
+    fn progress_at(&self, now: Instant) -> Option<f32> {
+        let transition = self.transition?;
+        let t = now
+            .saturating_duration_since(transition.started)
+            .as_secs_f32()
+            / TRANSITION.as_secs_f32();
+        if t >= 1.0 {
+            return None;
+        }
+        // Cubic ease-out: quick to respond, gentle to settle. The page
+        // resizes with the column, so it never has to catch up a jump.
+        let eased = 1.0 - (1.0 - t).powi(3);
+        Some(transition.from + (self.target() - transition.from) * eased)
+    }
+
+    /// Sets the open state, morphing from wherever the column is now.
+    fn set_open(&mut self, open: bool, animate: bool) {
+        let now = Instant::now();
+        let from = self.progress_at(now).unwrap_or_else(|| self.target());
+        self.open = open;
+        self.transition = animate.then_some(Transition { started: now, from });
+    }
+
+    /// Closes without animating, for when the whole layout changes anyway.
+    pub(crate) fn close_immediately(&mut self) {
+        self.open = false;
+        self.transition = None;
+    }
 }
 
 impl Library {
@@ -137,7 +187,7 @@ impl Library {
             section,
             search,
             downloads: Vec::new(),
-            opened: 0,
+            transition: None,
             _search_changed: search_changed,
         }
     }
@@ -237,8 +287,8 @@ impl BrowserWindow {
     }
 
     pub(crate) fn open_library(&mut self, cx: &mut Context<Self>) {
-        self.library.open = true;
-        self.library.opened += 1;
+        let animate = !settings(cx).appearance.reduce_motion;
+        self.library.set_open(true, animate);
         self.sidebar_peek = false;
         self.reload_library_downloads(cx);
         cx.notify();
@@ -246,10 +296,31 @@ impl BrowserWindow {
 
     pub(crate) fn close_library(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.library.open {
-            self.library.open = false;
+            let animate = !settings(cx).appearance.reduce_motion;
+            self.library.set_open(false, animate);
             self.focus_page_or_window(window, cx);
             cx.notify();
         }
+    }
+
+    /// How far the left column is from the sidebar (0.0) to the library
+    /// (1.0). While a morph is running this asks for the next frame.
+    pub(crate) fn library_progress(&mut self, window: &mut Window) -> f32 {
+        match self.library.progress_at(Instant::now()) {
+            Some(progress) => {
+                window.request_animation_frame();
+                progress
+            }
+            None => {
+                self.library.transition = None;
+                self.library.target()
+            }
+        }
+    }
+
+    /// Whether the sidebar and library are morphing into each other.
+    pub(crate) fn library_animating(&self) -> bool {
+        self.library.transition.is_some()
     }
 
     fn select_library_section(
@@ -291,7 +362,6 @@ impl BrowserWindow {
 
     pub(crate) fn render_library(&mut self, _: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let theme = *CurioTheme::get(cx);
-        let reduce_motion = settings(cx).appearance.reduce_motion;
         let query = self.library.search.read(cx).value().trim().to_lowercase();
 
         let sections: Vec<AnyElement> = LibrarySection::ALL
@@ -381,20 +451,14 @@ impl BrowserWindow {
             )
             .child(body);
 
+        // A fixed width, so the contents don't reflow while the column morphs.
         h_flex()
             .id("library")
-            .relative()
             .w(RAIL_WIDTH + self.sidebar_width)
             .h_full()
             .flex_shrink_0()
             .child(rail)
             .child(pane)
-            .with_animation(
-                ("library-in", self.library.opened),
-                Animation::new(Duration::from_millis(if reduce_motion { 1 } else { 220 }))
-                    .with_easing(gpui_kit::ease_out_quint()),
-                |el, t| el.opacity(t).left(px(-16. * (1. - t))),
-            )
             .into_any_element()
     }
 

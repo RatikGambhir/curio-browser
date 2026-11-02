@@ -202,7 +202,7 @@ impl BrowserWindow {
                     return;
                 }
                 this.sidebar_peek = false;
-                this.library.open = false;
+                this.library.close_immediately();
                 crate::update_settings(cx, |s| {
                     s.appearance.sidebar_visible = !s.appearance.sidebar_visible
                 });
