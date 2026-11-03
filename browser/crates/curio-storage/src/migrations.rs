@@ -103,6 +103,15 @@ const MIGRATIONS: &[&str] = &[
         finished_at INTEGER
     );
     ",
+    // v2: each space's gradient theme. NULL for spaces saved before themes,
+    // which then take one from their accent color.
+    "ALTER TABLE spaces ADD COLUMN gradient TEXT;",
+    // v3: closed tabs, for Reopen Closed Tab and Archived Tabs. Each row is
+    // a JSON `ClosedTab`, newest first by position.
+    "CREATE TABLE closed_tabs (
+        position INTEGER PRIMARY KEY,
+        data TEXT NOT NULL
+    );",
 ];
 
 /// The schema version this build expects.

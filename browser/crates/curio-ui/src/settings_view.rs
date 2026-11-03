@@ -437,7 +437,9 @@ impl SettingsView {
                             _ => ThemeMode::System,
                         };
                         update_settings(cx, |s| s.appearance.theme = mode);
-                    })).into_any_element(),
+                    }))
+                .description("For web pages. The sidebar, menus and assistant follow each space's theme.")
+                .into_any_element(),
             SettingRow::new("Tab layout", RadioGroup::horizontal("tab-layout")
                     .children(["Vertical", "Horizontal"])
                     .selected_index(Some(layout_index))

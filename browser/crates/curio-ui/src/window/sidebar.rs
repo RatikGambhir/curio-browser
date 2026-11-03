@@ -483,49 +483,47 @@ impl BrowserWindow {
         let theme = *CurioTheme::get(cx);
         let active = self.workspace.active_space_id();
         let downloads_active = self.downloads.iter().any(|d| !d.finished);
-        let spaces: Vec<AnyElement> =
-            self.workspace
-                .spaces()
-                .iter()
-                .map(|space| {
-                    let id = space.id;
-                    let is_active = id == active;
-                    let this = menu.this.clone();
-                    // Like Arc: one dot per space in the color picked for it; the
-                    // active space's dot is larger and solid.
-                    div()
-                        .id(SharedString::from(format!("space-{id}")))
-                        .w(px(18.))
-                        .h(px(28.))
-                        .rounded(px(6.))
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .cursor_pointer()
-                        .when(!is_active, |el| el.opacity(0.5).hover(|s| s.opacity(1.)))
-                        .child(
-                            ColorDot::new(CurioTheme::swatch(space.color))
-                                .diameter(px(if is_active { 8. } else { 6. })),
-                        )
-                        .tooltip_text(space.name.clone())
-                        .on_click(
-                            cx.listener(move |this, _, window, cx| {
-                                this.switch_space(id, window, cx)
-                            }),
-                        )
-                        .drag_over::<DraggedTab>(move |s, _, _, _| s.bg(theme.accent_soft))
-                        .on_drop(cx.listener(move |this, dragged: &DraggedTab, window, cx| {
-                            this.move_tab_to_space(dragged.id, id, window, cx);
-                        }))
-                        .on_drop(
-                            cx.listener(move |this, dragged: &DraggedGroup, window, cx| {
-                                this.move_group_to_space(dragged.id, dragged.space, id, window, cx);
-                            }),
-                        )
-                        .context_menu(move |menu, _, _| space_menu(menu, &this, id))
-                        .into_any_element()
-                })
-                .collect();
+        let spaces: Vec<AnyElement> = self
+            .workspace
+            .spaces()
+            .iter()
+            .map(|space| {
+                let id = space.id;
+                let is_active = id == active;
+                let this = menu.this.clone();
+                // Like Arc: one dot per space in the color picked for it; the
+                // active space's dot is larger and solid.
+                div()
+                    .id(SharedString::from(format!("space-{id}")))
+                    .w(px(18.))
+                    .h(px(28.))
+                    .rounded(px(6.))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .cursor_pointer()
+                    .when(!is_active, |el| el.opacity(0.5).hover(|s| s.opacity(1.)))
+                    .child(
+                        ColorDot::new(CurioTheme::gradient_swatch(space.gradient))
+                            .diameter(px(if is_active { 8. } else { 6. })),
+                    )
+                    .tooltip_text(space.name.clone())
+                    .on_click(
+                        cx.listener(move |this, _, window, cx| this.switch_space(id, window, cx)),
+                    )
+                    .drag_over::<DraggedTab>(move |s, _, _, _| s.bg(theme.accent_soft))
+                    .on_drop(cx.listener(move |this, dragged: &DraggedTab, window, cx| {
+                        this.move_tab_to_space(dragged.id, id, window, cx);
+                    }))
+                    .on_drop(
+                        cx.listener(move |this, dragged: &DraggedGroup, window, cx| {
+                            this.move_group_to_space(dragged.id, dragged.space, id, window, cx);
+                        }),
+                    )
+                    .context_menu(move |menu, _, _| space_menu(menu, &this, id))
+                    .into_any_element()
+            })
+            .collect();
         h_flex()
             .h(px(44.))
             .px(px(10.))

@@ -1461,8 +1461,10 @@ dependencies = [
  "curio-storage",
  "curio-tabs",
  "gpui-kit",
+ "image",
  "lb-wry",
  "serde_json",
+ "tempfile",
  "tracing",
 ]
 

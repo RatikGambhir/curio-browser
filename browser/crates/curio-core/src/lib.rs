@@ -5,12 +5,14 @@
 
 pub mod chat;
 pub mod color;
+pub mod gradient;
 pub mod ids;
 pub mod omnibox;
 pub mod tab;
 pub mod time;
 
 pub use color::AccentColor;
+pub use gradient::{SpaceGradient, Tone};
 pub use ids::{ConversationId, FavoriteId, GroupId, MessageId, SpaceId, TabId};
 pub use omnibox::{Navigation, SearchEngine, classify_input};
 pub use tab::{Favorite, Tab, TabGroup};

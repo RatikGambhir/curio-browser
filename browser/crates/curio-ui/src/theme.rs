@@ -1,12 +1,14 @@
 //! Curio's design system.
 //!
-//! The chrome takes its color from the active space, like Arc: a soft tinted
-//! gradient behind the sidebar with the page floating on top as a card.
-//! [`CurioTheme`] holds the derived tokens and is recomputed when the space
-//! accent or the light/dark appearance changes. The GPUI Kit component theme
-//! is kept in step so inputs, menus and dialogs share the accent.
+//! The chrome takes its color from the active space, like Arc: each space
+//! has a soft gradient theme behind the sidebar, with the page floating on
+//! top as a card. The theme's tone decides whether the chrome is light or
+//! dark, whatever the system appearance (web pages still follow the
+//! appearance setting). [`CurioTheme`] holds the tokens derived from the
+//! active space's gradient. The GPUI Kit component theme is kept in step so
+//! inputs, menus and dialogs share the accent.
 
-use curio_core::AccentColor;
+use curio_core::{AccentColor, SpaceGradient, Tone};
 use gpui_kit::component::{Theme, ThemeMode};
 use gpui_kit::{App, Global, Hsla, Rgba, Window, WindowAppearance, hsla, px};
 
@@ -21,14 +23,15 @@ pub enum Appearance {
 #[derive(Debug, Clone, Copy)]
 pub struct CurioTheme {
     pub appearance: Appearance,
-    pub accent_color: AccentColor,
+    pub gradient: SpaceGradient,
     /// The pure accent, for focus rings and primary buttons.
     pub accent: Hsla,
     /// A soft accent wash for selected rows and chips.
     pub accent_soft: Hsla,
     /// Accent-tinted text that stays legible on the chrome.
     pub accent_text: Hsla,
-    /// Window chrome gradient (top and bottom).
+    /// The gradient's color near the top and bottom of the sidebar, for
+    /// anything that needs a flat approximation of it.
     pub chrome_top: Hsla,
     pub chrome_bottom: Hsla,
     pub text: Hsla,
@@ -108,26 +111,36 @@ pub fn mix(a: Hsla, b: Hsla, t: f32) -> Hsla {
 }
 
 impl CurioTheme {
-    /// Computes tokens for an accent and appearance.
+    /// Computes tokens for a space gradient. Its tone sets the appearance.
     #[must_use]
-    pub fn new(accent_color: AccentColor, appearance: Appearance) -> Self {
-        let accent = hex(accent_color.rgb());
+    pub fn new(gradient: SpaceGradient) -> Self {
+        let accent = hex(gradient.accent_rgb());
         let h = accent.h;
-        // Graphite is intentionally almost neutral.
-        let tint = if accent_color == AccentColor::Graphite {
-            0.06
+        // Slate is intentionally almost neutral.
+        let tint = if gradient == SpaceGradient::Slate {
+            0.3
         } else {
             1.0
+        };
+        let spec = gradient.spec();
+        let sample = |y: f32| {
+            let [r, g, b] = spec.sample(0.08, y, 1.6);
+            Hsla::from(Rgba { r, g, b, a: 1.0 })
+        };
+        let (chrome_top, chrome_bottom) = (sample(0.04), sample(0.96));
+        let appearance = match gradient.tone() {
+            Tone::Light => Appearance::Light,
+            Tone::Dark => Appearance::Dark,
         };
         match appearance {
             Appearance::Light => Self {
                 appearance,
-                accent_color,
+                gradient,
                 accent,
                 accent_soft: with_alpha(accent, 0.14),
                 accent_text: hsla(h, (accent.s * 0.9).min(0.85), 0.36, 1.0),
-                chrome_top: hsla(h, 0.55 * tint, 0.905, 1.0),
-                chrome_bottom: hsla((h + 0.03).rem_euclid(1.0), 0.48 * tint, 0.855, 1.0),
+                chrome_top,
+                chrome_bottom,
                 text: hsla(h, 0.12 * tint, 0.13, 1.0),
                 text_muted: hsla(h, 0.10 * tint, 0.13, 0.80),
                 text_faint: hsla(h, 0.10 * tint, 0.13, 0.55),
@@ -153,12 +166,12 @@ impl CurioTheme {
             },
             Appearance::Dark => Self {
                 appearance,
-                accent_color,
+                gradient,
                 accent: hsla(h, accent.s.min(0.85), accent.l.max(0.62), 1.0),
                 accent_soft: hsla(h, accent.s, 0.62, 0.20),
                 accent_text: hsla(h, (accent.s * 0.9).min(0.85), 0.78, 1.0),
-                chrome_top: hsla(h, 0.24 * tint, 0.155, 1.0),
-                chrome_bottom: hsla((h + 0.03).rem_euclid(1.0), 0.20 * tint, 0.115, 1.0),
+                chrome_top,
+                chrome_bottom,
                 text: hsla(h, 0.10 * tint, 0.93, 1.0),
                 text_muted: hsla(h, 0.08 * tint, 0.93, 0.78),
                 text_faint: hsla(h, 0.08 * tint, 0.93, 0.52),
@@ -191,15 +204,11 @@ impl CurioTheme {
         cx.global::<Self>()
     }
 
-    /// Installs tokens for `accent` and `appearance`, and keeps the component
-    /// library theme in step.
-    pub fn apply(
-        accent: AccentColor,
-        appearance: Appearance,
-        window: Option<&mut Window>,
-        cx: &mut App,
-    ) {
-        let tokens = Self::new(accent, appearance);
+    /// Installs tokens for `gradient`, and keeps the component library theme
+    /// in step.
+    pub fn apply(gradient: SpaceGradient, window: Option<&mut Window>, cx: &mut App) {
+        let tokens = Self::new(gradient);
+        let appearance = tokens.appearance;
         let mode = match appearance {
             Appearance::Light => ThemeMode::Light,
             Appearance::Dark => ThemeMode::Dark,
@@ -246,7 +255,7 @@ impl CurioTheme {
     }
 
     /// Resolves the appearance for a theme setting and the window's system
-    /// appearance.
+    /// appearance. Web pages use this; the chrome follows the space.
     #[must_use]
     pub fn resolve(mode: curio_settings::ThemeMode, system: WindowAppearance) -> Appearance {
         match mode {
@@ -264,6 +273,12 @@ impl CurioTheme {
     pub fn swatch(color: AccentColor) -> Hsla {
         hex(color.rgb())
     }
+
+    /// A gradient's accent, for the small dots that stand for a space.
+    #[must_use]
+    pub fn gradient_swatch(gradient: SpaceGradient) -> Hsla {
+        hex(gradient.accent_rgb())
+    }
 }
 
 #[cfg(test)]
@@ -278,13 +293,72 @@ mod tests {
         assert!(m.h < 0.01 || m.h > 0.99, "{}", m.h);
     }
 
+    fn luminance(color: Hsla) -> f32 {
+        let rgba = Rgba::from(color);
+        let linear = |c: f32| {
+            if c <= 0.040_45 {
+                c / 12.92
+            } else {
+                ((c + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        0.2126 * linear(rgba.r) + 0.7152 * linear(rgba.g) + 0.0722 * linear(rgba.b)
+    }
+
+    /// `top` (which may be translucent) drawn over the opaque `bottom`.
+    fn over(top: Hsla, bottom: Hsla) -> Hsla {
+        let (t, b) = (Rgba::from(top), Rgba::from(bottom));
+        let a = t.a;
+        Hsla::from(Rgba {
+            r: t.r * a + b.r * (1.0 - a),
+            g: t.g * a + b.g * (1.0 - a),
+            b: t.b * a + b.b * (1.0 - a),
+            a: 1.0,
+        })
+    }
+
+    fn contrast(a: Hsla, b: Hsla) -> f32 {
+        let (la, lb) = (luminance(a), luminance(b));
+        (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
+    }
+
+    /// Every point of the sidebar (the left fifth of the window), for every
+    /// theme, keeps text readable: AAA for titles, AA for secondary text,
+    /// and AA for the selected row's text on its raised background.
     #[test]
-    fn light_and_dark_text_contrast_with_chrome() {
-        for accent in AccentColor::ALL {
-            let light = CurioTheme::new(accent, Appearance::Light);
-            assert!(light.chrome_top.l - light.text.l > 0.6);
-            let dark = CurioTheme::new(accent, Appearance::Dark);
-            assert!(dark.text.l - dark.chrome_top.l > 0.6);
+    fn text_stays_readable_on_every_gradient() {
+        for gradient in SpaceGradient::all() {
+            let theme = CurioTheme::new(gradient);
+            let spec = gradient.spec();
+            for i in 0..=8 {
+                for j in 0..=20 {
+                    let (x, y) = (i as f32 * 0.025, j as f32 / 20.0);
+                    let [r, g, b] = spec.sample(x, y, 1.6);
+                    let bg = Hsla::from(Rgba { r, g, b, a: 1.0 });
+                    let text = contrast(over(theme.text, bg), bg);
+                    let muted = contrast(over(theme.text_muted, bg), bg);
+                    let selected_bg = over(theme.row_active, bg);
+                    let selected = contrast(over(theme.row_active_text, selected_bg), selected_bg);
+                    assert!(text >= 7.0, "{gradient:?} text {text:.1} at {x},{y}");
+                    assert!(muted >= 4.5, "{gradient:?} muted {muted:.1} at {x},{y}");
+                    assert!(
+                        selected >= 4.5,
+                        "{gradient:?} selected {selected:.1} at {x},{y}"
+                    );
+                }
+            }
         }
+    }
+
+    #[test]
+    fn tone_sets_the_appearance() {
+        assert_eq!(
+            CurioTheme::new(SpaceGradient::LavenderBlush).appearance,
+            Appearance::Light
+        );
+        assert_eq!(
+            CurioTheme::new(SpaceGradient::Forest).appearance,
+            Appearance::Dark
+        );
     }
 }

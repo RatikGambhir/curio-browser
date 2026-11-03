@@ -25,9 +25,14 @@ Curio is a desktop web browser. Every piece of its own interface (sidebar, tab s
 - **Pinned tabs** per space, which unload instead of closing. **Favorites** are global across spaces and keep their own page state.
 - **Folders (tab groups)**: create, rename, recolor, collapse, reorder, ungroup, close, and move to another space.
 - Drag and drop to reorder tabs, move them into or out of folders, pin them (drop above the line), favorite them, or move them to another space (drop on a space icon).
-- **Spaces** with their own name, icon, accent color, tabs, pinned tabs, folders and active tab. Switch with the space bar, Ctrl-1…9, ⌃⌘←/→ or a two-finger horizontal swipe on the sidebar. The window chrome cross-fades to the space's color.
+- **Spaces** with their own name, icon, theme, tabs, pinned tabs, folders and active tab. Switch with the space bar, Ctrl-1…9, ⌃⌘←/→ or a two-finger horizontal swipe on the sidebar. The window chrome cross-fades to the space's theme.
+- **Space themes**: 20 soft, atmospheric gradients (10 light, such as Lavender Blush, Sky Haze and Peach Glow, and 10 dark, such as Midnight Indigo, Forest and Ember), each with several color stops and faint ambient glows. A space's theme decides whether its sidebar, menus and assistant are light or dark; web pages follow the Theme setting.
 - Background tabs are put to sleep after a period of inactivity, or when more than the configured number are loaded. They reload, scrolled back to where you were, when you return.
 - Reopen closed tabs (⌘⇧T), duplicate, close others, copy link.
+
+**Library**
+- An Arc-style library in place of the sidebar, with Media, Downloads, Spaces and Archived Tabs (plus Notes, Calendar, Clipboard History, Aliases and Inbox placeholders).
+- **Media** shows the images and videos on your Mac, newest first: everything in Desktop, Documents, Downloads, Pictures and Movies (and loose files in your home folder), plus downloads saved anywhere else. Search by file or folder name; click a tile to show it in Finder. It skips hidden folders, app and Photos libraries, and build folders such as `node_modules`. macOS asks for access to Desktop, Documents and Downloads the first time you open Media.
 
 **Assistant (Dia-inspired)**
 - A chat panel on the right (⌘E) with streaming Markdown answers, code blocks with copy buttons, multiple conversations and saved history.
@@ -38,7 +43,7 @@ Curio is a desktop web browser. Every piece of its own interface (sidebar, tab s
 - Providers: **Anthropic** (default model `claude-opus-5-5`), **OpenAI**, or any **OpenAI-compatible** server (Ollama, LM Studio, OpenRouter, vLLM…). The model and base URL are configurable. API keys are stored in the macOS Keychain.
 
 **Design**
-- Light and dark themes that follow macOS, each space's accent color tinting the chrome, the page floating as a card, smooth transitions, and a native menu bar with standard shortcuts.
+- Light and dark space themes (web pages follow macOS or the Theme setting), the page floating as a card, smooth transitions, and a native menu bar with standard shortcuts.
 
 ## Requirements
 

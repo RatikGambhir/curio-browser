@@ -36,6 +36,7 @@ mod divider;
 mod drag_preview;
 mod empty_state;
 mod favicon;
+mod gradient_backdrop;
 mod icon_button;
 mod icon_tile;
 mod kbd;
@@ -54,6 +55,7 @@ pub use divider::Divider;
 pub use drag_preview::DragPreview;
 pub use empty_state::EmptyState;
 pub use favicon::{Favicon, logo_mark};
+pub use gradient_backdrop::{GradientBackdrop, GradientSize, gradient_image};
 pub use icon_button::IconButton;
 pub use icon_tile::IconTile;
 pub use kbd::Kbd;
@@ -69,9 +71,9 @@ pub use style::{CurioStyled, TooltipExt, WindowDragExt, dialog_footer, traffic_l
 /// Everything needed to build UI with Curio's components in one import.
 pub mod prelude {
     pub use super::{
-        Chip, ColorDot, CurioStyled as _, Divider, DragPreview, EmptyState, Favicon, IconButton,
-        IconTile, Kbd, ListItem, LoadingBar, RailItem, SearchField, SectionLabel, SelectedStyle,
-        SettingRow, TooltipExt as _, WindowDragExt as _, dialog_footer, entity_item, logo_mark,
-        traffic_lights_spacer,
+        Chip, ColorDot, CurioStyled as _, Divider, DragPreview, EmptyState, Favicon,
+        GradientBackdrop, IconButton, IconTile, Kbd, ListItem, LoadingBar, RailItem, SearchField,
+        SectionLabel, SelectedStyle, SettingRow, TooltipExt as _, WindowDragExt as _,
+        dialog_footer, entity_item, logo_mark, traffic_lights_spacer,
     };
 }

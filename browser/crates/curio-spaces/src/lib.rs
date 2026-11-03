@@ -8,8 +8,8 @@
 
 use std::collections::VecDeque;
 
-use curio_core::time::now_ms;
-use curio_core::{AccentColor, Favorite, FavoriteId, GroupId, SpaceId, Tab, TabId};
+use curio_core::time::{Timestamp, now_ms};
+use curio_core::{Favorite, FavoriteId, GroupId, SpaceGradient, SpaceId, Tab, TabId};
 use curio_tabs::{Placement, Section, TabStrip};
 use serde::{Deserialize, Serialize};
 
@@ -30,7 +30,9 @@ pub struct Space {
     pub name: String,
     /// A short glyph or emoji shown in the space switcher.
     pub icon: String,
-    pub color: AccentColor,
+    /// The gradient behind the chrome, which also decides whether the
+    /// chrome is light or dark.
+    pub gradient: SpaceGradient,
     pub strip: TabStrip,
     /// The tab shown when this space is active. May refer to a favorite's tab.
     pub active_tab: Option<TabId>,
@@ -42,7 +44,7 @@ impl Default for Space {
             id: SpaceId::new(),
             name: "Space".to_owned(),
             icon: SPACE_ICONS[0].to_owned(),
-            color: AccentColor::default(),
+            gradient: SpaceGradient::default(),
             strip: TabStrip::new(),
             active_tab: None,
         }
@@ -52,11 +54,11 @@ impl Default for Space {
 impl Space {
     /// Creates an empty space.
     #[must_use]
-    pub fn new(name: impl Into<String>, icon: impl Into<String>, color: AccentColor) -> Self {
+    pub fn new(name: impl Into<String>, icon: impl Into<String>, gradient: SpaceGradient) -> Self {
         Self {
             name: name.into(),
             icon: icon.into(),
-            color,
+            gradient,
             ..Self::default()
         }
     }
@@ -69,12 +71,16 @@ pub enum TabOwner {
     Favorite(FavoriteId),
 }
 
-/// A closed tab remembered for "Reopen Closed Tab".
-#[derive(Debug, Clone, PartialEq)]
+/// A closed tab remembered for "Reopen Closed Tab" and the Library's
+/// Archived Tabs. Saved with the session, so it survives restarts.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ClosedTab {
     pub space: SpaceId,
     pub tab: Tab,
     pub restore_at: Placement,
+    /// When it was closed, in milliseconds since the Unix epoch.
+    #[serde(default)]
+    pub closed_at: Timestamp,
 }
 
 /// The result of closing a tab.
@@ -99,7 +105,7 @@ pub struct Workspace {
 impl Default for Workspace {
     fn default() -> Self {
         Self::with_spaces(
-            vec![Space::new("Personal", "✦", AccentColor::Iris)],
+            vec![Space::new("Personal", "✦", SpaceGradient::LavenderBlush)],
             Vec::new(),
         )
     }
@@ -111,7 +117,7 @@ impl Workspace {
     #[must_use]
     pub fn with_spaces(mut spaces: Vec<Space>, favorites: Vec<Favorite>) -> Self {
         if spaces.is_empty() {
-            spaces.push(Space::new("Personal", "✦", AccentColor::Iris));
+            spaces.push(Space::new("Personal", "✦", SpaceGradient::LavenderBlush));
         }
         let active_space = spaces[0].id;
         let mut workspace = Self {
@@ -134,8 +140,8 @@ impl Workspace {
     /// A first-run workspace with two starter spaces.
     #[must_use]
     pub fn first_run() -> Self {
-        let personal = Space::new("Personal", "✦", AccentColor::Iris);
-        let work = Space::new("Work", "💼", AccentColor::Lagoon);
+        let personal = Space::new("Personal", "✦", SpaceGradient::LavenderBlush);
+        let work = Space::new("Work", "💼", SpaceGradient::SkyHaze);
         Self::with_spaces(vec![personal, work], Vec::new())
     }
 
@@ -189,14 +195,14 @@ impl Workspace {
         &mut self,
         name: impl Into<String>,
         icon: impl Into<String>,
-        color: Option<AccentColor>,
+        gradient: Option<SpaceGradient>,
     ) -> SpaceId {
-        let color = color.unwrap_or_else(|| {
+        let gradient = gradient.unwrap_or_else(|| {
             self.spaces
                 .last()
-                .map_or(AccentColor::Iris, |space| space.color.next())
+                .map_or(SpaceGradient::default(), |space| space.gradient.next())
         });
-        let space = Space::new(name, icon, color);
+        let space = Space::new(name, icon, gradient);
         let id = space.id;
         self.spaces.push(space);
         id
@@ -225,9 +231,9 @@ impl Workspace {
         }
     }
 
-    /// Changes a space's accent color.
-    pub fn set_space_color(&mut self, id: SpaceId, color: AccentColor) -> bool {
-        self.space_mut(id).map(|s| s.color = color).is_some()
+    /// Changes a space's gradient theme.
+    pub fn set_space_gradient(&mut self, id: SpaceId, gradient: SpaceGradient) -> bool {
+        self.space_mut(id).map(|s| s.gradient = gradient).is_some()
     }
 
     /// Deletes a space and its tabs. The last space cannot be deleted.
@@ -399,6 +405,7 @@ impl Workspace {
             space: space_id,
             tab: removed.tab,
             restore_at: removed.restore_at,
+            closed_at: now_ms(),
         });
         self.closed.truncate(CLOSED_TAB_LIMIT);
         // Spaces showing a favorite that is unrelated stay as they are.
@@ -437,6 +444,20 @@ impl Workspace {
     /// Recently closed tabs, most recent first.
     pub fn closed_tabs(&self) -> impl Iterator<Item = &ClosedTab> {
         self.closed.iter()
+    }
+
+    /// Restores saved closed tabs, newest first. Tabs from spaces that no
+    /// longer exist are dropped, and only the newest [`CLOSED_TAB_LIMIT`]
+    /// are kept.
+    pub fn restore_closed_tabs(&mut self, closed: impl IntoIterator<Item = ClosedTab>) {
+        let mut closed: Vec<ClosedTab> = closed
+            .into_iter()
+            .filter(|c| self.space(c.space).is_some())
+            .collect();
+        // Stable, so tabs closed in the same millisecond keep their order.
+        closed.sort_by_key(|c| std::cmp::Reverse(c.closed_at));
+        closed.truncate(CLOSED_TAB_LIMIT);
+        self.closed = closed.into();
     }
 
     /// Number of tabs that can be reopened.
@@ -628,6 +649,8 @@ impl Workspace {
 
 #[cfg(test)]
 mod tests {
+    use curio_core::AccentColor;
+
     use super::*;
 
     fn workspace_with_tabs() -> (Workspace, SpaceId, SpaceId, Vec<TabId>) {
@@ -703,6 +726,26 @@ mod tests {
         assert!(ws.move_tab_to_space(ids[0], b));
         assert_eq!(ws.space_of_tab(ids[0]), Some(b));
         assert_eq!(ws.space(a).map(|s| s.strip.len()), Some(2));
+    }
+
+    #[test]
+    fn restored_closed_tabs_are_newest_first_and_skip_missing_spaces() {
+        let (mut ws, a, _, ids) = workspace_with_tabs();
+        ws.close_tab(ids[0]).expect("tab exists");
+        ws.close_tab(ids[1]).expect("tab exists");
+        let mut saved: Vec<ClosedTab> = ws.closed_tabs().cloned().collect();
+        saved[0].closed_at = 2_000;
+        saved[1].closed_at = 3_000;
+        let mut orphan = saved[0].clone();
+        orphan.space = SpaceId::new();
+        saved.push(orphan);
+
+        let mut restored = ws.clone();
+        restored.restore_closed_tabs(saved);
+
+        let order: Vec<TabId> = restored.closed_tabs().map(|c| c.tab.id).collect();
+        assert_eq!(order, vec![ids[0], ids[1]]);
+        assert!(restored.closed_tabs().all(|c| c.space == a));
     }
 
     #[test]

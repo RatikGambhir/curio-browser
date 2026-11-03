@@ -12,6 +12,7 @@ mod drag;
 mod library;
 mod sidebar;
 mod tabs;
+mod thumbnails;
 mod toolbar;
 mod view_model;
 
@@ -29,14 +30,14 @@ use gpui_kit::{
     Animation, AnimationExt as _, AnyElement, AppContext as _, Context, Entity, FocusHandle,
     Focusable, InteractiveElement as _, IntoElement, MouseButton, MouseMoveEvent, MouseUpEvent,
     ParentElement as _, Pixels, Render, StatefulInteractiveElement as _, Styled as _, Subscription,
-    Task, Window, deferred, div, linear_color_stop, linear_gradient, px,
+    Task, Window, deferred, div, px,
 };
 
-use crate::components::CurioStyled as _;
+use crate::components::{CurioStyled as _, GradientBackdrop};
 
 use crate::ai_panel::{AiPanel, AiPanelEvent};
 use crate::command_bar::{CommandBar, CommandBarEvent, CommandMode};
-use crate::theme::{Appearance, CurioTheme, metrics, mix};
+use crate::theme::{Appearance, CurioTheme, metrics};
 use crate::{Services, actions, settings};
 
 pub(crate) use drag::{DraggedGroup, DraggedTab};
@@ -89,6 +90,9 @@ pub struct BrowserWindow {
     pub(crate) space_transition: usize,
     pub(crate) space_direction: f32,
     previous_theme: CurioTheme,
+    /// Light or dark for web pages, from the appearance setting. The chrome
+    /// follows the active space's gradient instead.
+    web_appearance: Appearance,
     swipe_accumulator: f32,
     save_pending: bool,
     pub(crate) downloads: Vec<DownloadItem>,
@@ -152,10 +156,9 @@ impl BrowserWindow {
             async {}
         }));
 
-        let accent = workspace.active_space().color;
-        let appearance = CurioTheme::resolve(settings.appearance.theme, window.appearance());
-        CurioTheme::apply(accent, appearance, Some(window), cx);
+        CurioTheme::apply(workspace.active_space().gradient, Some(window), cx);
         let previous_theme = *CurioTheme::get(cx);
+        let web_appearance = CurioTheme::resolve(settings.appearance.theme, window.appearance());
 
         let maintenance = cx.spawn_in(window, async move |this, cx| {
             loop {
@@ -195,6 +198,7 @@ impl BrowserWindow {
             space_transition: 0,
             space_direction: 0.0,
             previous_theme,
+            web_appearance,
             swipe_accumulator: 0.0,
             save_pending: false,
             downloads: Vec::new(),
@@ -235,18 +239,22 @@ impl BrowserWindow {
         self.library.open || self.library_animating() || self.sidebar_visible(cx)
     }
 
-    /// Re-applies the theme for the active space and appearance setting.
+    /// Re-applies the active space's gradient to the chrome, and the
+    /// appearance setting to web pages.
     pub(crate) fn apply_theme(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let accent = self.workspace.active_space().color;
-        let mode = settings(cx).appearance.theme;
-        let appearance = CurioTheme::resolve(mode, window.appearance());
+        let gradient = self.workspace.active_space().gradient;
         let current = *CurioTheme::get(cx);
-        if current.accent_color != accent || current.appearance != appearance {
+        if current.gradient != gradient {
             self.previous_theme = current;
-            CurioTheme::apply(accent, appearance, Some(window), cx);
+            CurioTheme::apply(gradient, Some(window), cx);
+        }
+        let mode = settings(cx).appearance.theme;
+        let web = CurioTheme::resolve(mode, window.appearance());
+        if web != self.web_appearance {
+            self.web_appearance = web;
             for tab in self.tabs.values() {
                 if let Some(webview) = tab.read(cx).webview() {
-                    let _ = webview.read(cx).set_theme(match appearance {
+                    let _ = webview.read(cx).set_theme(match web {
                         Appearance::Light => wry::Theme::Light,
                         Appearance::Dark => wry::Theme::Dark,
                     });
@@ -635,19 +643,43 @@ impl Render for BrowserWindow {
             );
         }
 
+        // The space gradient fills the window behind everything. When the
+        // space changes, the new one fades in over the previous one.
         let transition = self.space_transition;
+        let backdrop = div()
+            .absolute()
+            .top_0()
+            .left_0()
+            .size_full()
+            .child(GradientBackdrop::new(previous.gradient))
+            .child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .size_full()
+                    .child(GradientBackdrop::new(theme.gradient))
+                    .with_animation(
+                        ("space-tint", transition),
+                        Animation::new(Duration::from_millis(if reduce_motion { 1 } else { 320 }))
+                            .with_easing(gpui_kit::ease_in_out),
+                        |el, t| el.opacity(t),
+                    ),
+            );
         let mut root = div()
             .id("browser-window")
             .key_context("BrowserWindow")
             .track_focus(&self.focus_handle)
             .relative()
             .size_full()
+            .bg(theme.chrome_bottom)
             .text_color(theme.text)
             .on_mouse_move(cx.listener(Self::on_root_mouse_move))
             .on_mouse_up(
                 MouseButton::Left,
                 cx.listener(|this, _: &MouseUpEvent, _, cx| this.finish_resize(cx)),
             )
+            .child(backdrop)
             .child(row);
         root = self.register_actions(root, cx);
 
@@ -665,7 +697,7 @@ impl Render for BrowserWindow {
                     .shadow_2xl()
                     .border_1()
                     .border_color(theme.surface_border)
-                    .chrome_gradient(&theme)
+                    .child(GradientBackdrop::new(theme.gradient))
                     .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
                         if !*hovered {
                             this.sidebar_peek = false;
@@ -709,18 +741,6 @@ impl Render for BrowserWindow {
             ));
         }
 
-        // Cross-fade the chrome tint when switching spaces.
-        root.with_animation(
-            ("space-tint", transition),
-            Animation::new(Duration::from_millis(if reduce_motion { 1 } else { 320 }))
-                .with_easing(gpui_kit::ease_in_out),
-            move |el, t| {
-                el.bg(linear_gradient(
-                    180.,
-                    linear_color_stop(mix(previous.chrome_top, theme.chrome_top, t), 0.),
-                    linear_color_stop(mix(previous.chrome_bottom, theme.chrome_bottom, t), 1.),
-                ))
-            },
-        )
+        root
     }
 }

@@ -9,6 +9,7 @@
 //! the UI can hand writes to background threads.
 
 mod database;
+pub mod media;
 mod migrations;
 pub mod paths;
 

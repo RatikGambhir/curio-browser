@@ -1,6 +1,6 @@
 //! Dialogs: editing spaces and groups, confirmations, history, downloads.
 
-use curio_core::{AccentColor, GroupId, SpaceId, display_host};
+use curio_core::{GroupId, SpaceGradient, SpaceId, display_host};
 use curio_spaces::SPACE_ICONS;
 use curio_storage::HistoryEntry;
 use gpui_kit::Focusable as _;
@@ -24,7 +24,7 @@ use crate::{Services, settings_view};
 struct SpaceEditor {
     name: Entity<InputState>,
     icon: String,
-    color: AccentColor,
+    gradient: SpaceGradient,
     _subscription: Subscription,
 }
 
@@ -32,7 +32,7 @@ impl SpaceEditor {
     fn new(
         name: &str,
         icon: &str,
-        color: AccentColor,
+        gradient: SpaceGradient,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -45,16 +45,59 @@ impl SpaceEditor {
         Self {
             name: input,
             icon: icon.to_owned(),
-            color,
+            gradient,
             _subscription: subscription,
         }
+    }
+
+    /// One row of theme tiles.
+    fn theme_row(
+        &self,
+        gradients: [SpaceGradient; 10],
+        theme: &CurioTheme,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let tiles = gradients.into_iter().map(|gradient| {
+            let selected = self.gradient == gradient;
+            // The ring sits outside the tile, so the selected one doesn't shrink.
+            div()
+                .id(SharedString::from(format!("theme-{}", gradient.label())))
+                .flex_1()
+                .min_w_0()
+                .p(px(2.))
+                .rounded(px(9.))
+                .border_2()
+                .border_color(if selected {
+                    theme.accent
+                } else {
+                    gpui_kit::transparent_black()
+                })
+                .cursor_pointer()
+                .when(!selected, |el| el.hover(|s| s.opacity(0.85)))
+                .child(
+                    div()
+                        .relative()
+                        .h(px(26.))
+                        .rounded(px(6.))
+                        .overflow_hidden()
+                        .border_1()
+                        .border_color(theme.surface_border)
+                        .child(GradientBackdrop::new(gradient).swatch()),
+                )
+                .tooltip_text(gradient.label())
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.gradient = gradient;
+                    cx.notify();
+                }))
+        });
+        h_flex().gap(px(2.)).children(tiles)
     }
 }
 
 impl Render for SpaceEditor {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = *CurioTheme::get(cx);
-        let preview = CurioTheme::new(self.color, theme.appearance);
+        let preview = CurioTheme::new(self.gradient);
         let icons = SPACE_ICONS.iter().map(|icon| {
             let selected = self.icon == *icon;
             let value = (*icon).to_owned();
@@ -79,33 +122,17 @@ impl Render for SpaceEditor {
                     cx.notify();
                 }))
         });
-        let colors = AccentColor::ALL.into_iter().map(|color| {
-            let selected = self.color == color;
-            div()
-                .id(SharedString::from(format!("color-{}", color.label())))
-                .size(px(26.))
-                .rounded_full()
-                .bg(CurioTheme::swatch(color))
-                .cursor_pointer()
-                .border_2()
-                .border_color(if selected {
-                    theme.text
-                } else {
-                    gpui_kit::transparent_black()
-                })
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.color = color;
-                    cx.notify();
-                }))
-        });
         v_flex()
             .gap(px(14.))
             .child(
                 h_flex()
+                    .relative()
+                    .overflow_hidden()
                     .gap(px(12.))
                     .p(px(12.))
+                    .h(px(64.))
                     .rounded(px(12.))
-                    .chrome_gradient(&preview)
+                    .child(GradientBackdrop::new(self.gradient))
                     .child(
                         div()
                             .text_size(px(22.))
@@ -124,13 +151,24 @@ impl Render for SpaceEditor {
                                     name
                                 }
                             })),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(preview.text_muted)
+                            .child(self.gradient.label()),
                     ),
             )
             .child(Input::new(&self.name))
             .child(SectionLabel::new("Icon"))
             .child(h_flex().flex_wrap().gap(px(4.)).children(icons))
-            .child(SectionLabel::new("Color"))
-            .child(h_flex().flex_wrap().gap(px(8.)).children(colors))
+            .child(SectionLabel::new("Theme"))
+            .child(
+                v_flex()
+                    .gap(px(4.))
+                    .child(self.theme_row(SpaceGradient::LIGHT, &theme, cx))
+                    .child(self.theme_row(SpaceGradient::DARK, &theme, cx)),
+            )
     }
 }
 
@@ -153,22 +191,22 @@ impl BrowserWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let (name, icon, color) = match space.and_then(|id| self.workspace.space(id)) {
-            Some(space) => (space.name.clone(), space.icon.clone(), space.color),
+        let (name, icon, gradient) = match space.and_then(|id| self.workspace.space(id)) {
+            Some(space) => (space.name.clone(), space.icon.clone(), space.gradient),
             None => {
-                let color = self
+                let gradient = self
                     .workspace
                     .spaces()
                     .last()
-                    .map_or(AccentColor::Iris, |s| s.color.next());
+                    .map_or(SpaceGradient::default(), |s| s.gradient.next());
                 (
                     String::new(),
                     SPACE_ICONS[(self.workspace.spaces().len() + 3) % SPACE_ICONS.len()].to_owned(),
-                    color,
+                    gradient,
                 )
             }
         };
-        let editor = cx.new(|cx| SpaceEditor::new(&name, &icon, color, window, cx));
+        let editor = cx.new(|cx| SpaceEditor::new(&name, &icon, gradient, window, cx));
         let focus = editor.read(cx).name.read(cx).focus_handle(cx);
         window.focus(&focus, cx);
         let this = cx.entity().downgrade();
@@ -207,9 +245,9 @@ impl BrowserWindow {
                                     } else {
                                         name
                                     };
-                                    let (icon, color) = (editor.icon.clone(), editor.color);
+                                    let (icon, gradient) = (editor.icon.clone(), editor.gradient);
                                     let _ = this.update(cx, |this, cx| {
-                                        this.save_space(space, &name, &icon, color, window, cx);
+                                        this.save_space(space, &name, &icon, gradient, window, cx);
                                     });
                                     window.close_dialog(cx);
                                 }),
@@ -223,7 +261,7 @@ impl BrowserWindow {
         space: Option<SpaceId>,
         name: &str,
         icon: &str,
-        color: AccentColor,
+        gradient: SpaceGradient,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -231,11 +269,11 @@ impl BrowserWindow {
             Some(id) => {
                 self.workspace.rename_space(id, name);
                 self.workspace.set_space_icon(id, icon);
-                self.workspace.set_space_color(id, color);
+                self.workspace.set_space_gradient(id, gradient);
                 self.apply_theme(window, cx);
             }
             None => {
-                let id = self.workspace.create_space(name, icon, Some(color));
+                let id = self.workspace.create_space(name, icon, Some(gradient));
                 self.switch_space(id, window, cx);
                 self.open_command_bar(crate::command_bar::CommandMode::NewTab, window, cx);
             }

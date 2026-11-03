@@ -6,22 +6,26 @@
 //! while the sidebar and the library cross-fade inside it.
 
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use curio_core::display_host;
 use curio_storage::DownloadRecord;
+use curio_storage::media::{self, MediaFile, MediaKind};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::{Icon, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, AppContext as _, Context, Entity, FontWeight, InteractiveElement as _, IntoElement,
-    ObjectFit, ParentElement as _, Pixels, SharedString, StatefulInteractiveElement as _,
-    Styled as _, StyledImage as _, Subscription, Window, div, img, px,
+    AnyElement, App, AppContext as _, Context, Entity, FontWeight, InteractiveElement as _,
+    IntoElement, ObjectFit, ParentElement as _, Pixels, SharedString,
+    StatefulInteractiveElement as _, Styled as _, StyledImage as _, Subscription, Window, div, img,
+    px, uniform_list,
 };
 
 use super::BrowserWindow;
+use super::thumbnails::{MediaThumbnails, Thumbnail};
 use crate::components::prelude::*;
 use crate::theme::{CurioTheme, metrics};
 use crate::{Services, actions, settings};
@@ -32,9 +36,9 @@ pub(crate) const RAIL_WIDTH: Pixels = px(84.);
 /// How long the sidebar ⇄ library morph takes.
 const TRANSITION: Duration = Duration::from_millis(280);
 
-/// File extensions shown under Media.
-const IMAGE_EXTENSIONS: [&str; 8] = ["png", "jpg", "jpeg", "gif", "webp", "heic", "svg", "bmp"];
-const VIDEO_EXTENSIONS: [&str; 5] = ["mp4", "mov", "m4v", "webm", "mkv"];
+/// Height of one row of Media tiles: the preview, two lines of text, and the
+/// gap below. `uniform_list` needs every row the same height.
+const MEDIA_PREVIEW_HEIGHT: Pixels = px(96.);
 
 /// A collection in the library.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -121,9 +125,16 @@ pub(crate) struct Library {
     section: LibrarySection,
     search: Entity<InputState>,
     downloads: Vec<DownloadRecord>,
+    /// Images and videos found in the user's folders, newest first.
+    media: Rc<Vec<MediaFile>>,
+    media_scanning: bool,
+    /// Whether a scan has finished since the library opened.
+    media_scanned: bool,
+    thumbnails: Entity<MediaThumbnails>,
     /// The sidebar ⇄ library morph in flight, if any.
     transition: Option<Transition>,
     _search_changed: Subscription,
+    _thumbnails_changed: Subscription,
 }
 
 /// A morph between the sidebar (0.0) and the library (1.0), heading
@@ -182,13 +193,20 @@ impl Library {
                 cx.notify();
             }
         });
+        let thumbnails = cx.new(|_| MediaThumbnails::new());
+        let thumbnails_changed = cx.observe(&thumbnails, |_, _, cx| cx.notify());
         Self {
             open: false,
             section,
             search,
             downloads: Vec::new(),
+            media: Rc::default(),
+            media_scanning: false,
+            media_scanned: false,
+            thumbnails,
             transition: None,
             _search_changed: search_changed,
+            _thumbnails_changed: thumbnails_changed,
         }
     }
 }
@@ -200,13 +218,6 @@ fn matches(query: &str, fields: &[&str]) -> bool {
             .iter()
             .any(|field| field.to_lowercase().contains(word))
     })
-}
-
-fn extension(path: &str) -> String {
-    Path::new(path)
-        .extension()
-        .map(|e| e.to_string_lossy().to_lowercase())
-        .unwrap_or_default()
 }
 
 /// A download's file name, or its host while the name is unknown.
@@ -252,7 +263,9 @@ fn empty_copy(section: LibrarySection) -> (&'static str, &'static str) {
     match section {
         LibrarySection::Media => (
             "No media yet",
-            "Images and videos you download show up here.",
+            "Images and videos in your Desktop, Documents, Downloads, Pictures and Movies \
+             folders show up here. If some are missing, allow Curio in System Settings › \
+             Privacy & Security › Files & Folders.",
         ),
         LibrarySection::Downloads => ("No downloads yet", "Files you download show up here."),
         LibrarySection::Notes => ("No notes yet", "Notes you write will live here."),
@@ -277,6 +290,73 @@ fn empty_copy(section: LibrarySection) -> (&'static str, &'static str) {
     }
 }
 
+/// One Media tile: a preview, the file name and its folder. Clicking it
+/// shows the file in Finder.
+fn media_tile(
+    index: usize,
+    file: &MediaFile,
+    thumbnails: &Entity<MediaThumbnails>,
+    theme: &CurioTheme,
+    cx: &mut App,
+) -> AnyElement {
+    let fallback_icon = match file.kind {
+        MediaKind::Image => IconName::Image,
+        MediaKind::Video => IconName::Film,
+    };
+    let thumbnail = thumbnails.update(cx, |thumbnails, cx| {
+        thumbnails.get(&file.path, file.kind, cx)
+    });
+    let preview = match thumbnail {
+        Thumbnail::Ready(image) => img(image)
+            .size_full()
+            .object_fit(ObjectFit::Cover)
+            .into_any_element(),
+        Thumbnail::Loading => div().into_any_element(),
+        Thumbnail::Unavailable => div()
+            .text_color(theme.text_faint)
+            .child(Icon::new(fallback_icon).size(px(24.)))
+            .into_any_element(),
+    };
+    let path = file.path.clone();
+    v_flex()
+        .id(SharedString::from(format!("media-{index}")))
+        .flex_1()
+        .min_w_0()
+        .gap(px(2.))
+        .cursor_pointer()
+        .hover(|s| s.opacity(0.85))
+        .child(
+            div()
+                .h(MEDIA_PREVIEW_HEIGHT)
+                .w_full()
+                .mb(px(2.))
+                .rounded(px(10.))
+                .overflow_hidden()
+                .surface(theme)
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(preview),
+        )
+        .child(
+            div()
+                .text_xs()
+                .text_color(theme.text_muted)
+                .truncate()
+                .child(SharedString::from(file.name.clone())),
+        )
+        .child(
+            div()
+                .text_xs()
+                .text_color(theme.text_faint)
+                .truncate()
+                .child(SharedString::from(file.folder.clone())),
+        )
+        .tooltip_text("Show in Finder")
+        .on_click(move |_, _, cx| cx.reveal_path(&path))
+        .into_any_element()
+}
+
 impl BrowserWindow {
     pub(crate) fn toggle_library(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.library.open {
@@ -290,7 +370,9 @@ impl BrowserWindow {
         let animate = !settings(cx).appearance.reduce_motion;
         self.library.set_open(true, animate);
         self.sidebar_peek = false;
+        self.library.media_scanned = false;
         self.reload_library_downloads(cx);
+        self.reload_library_media(cx);
         cx.notify();
     }
 
@@ -298,6 +380,9 @@ impl BrowserWindow {
         if self.library.open {
             let animate = !settings(cx).appearance.reduce_motion;
             self.library.set_open(false, animate);
+            self.library
+                .thumbnails
+                .update(cx, |thumbnails, cx| thumbnails.clear(window, cx));
             self.focus_page_or_window(window, cx);
             cx.notify();
         }
@@ -337,7 +422,39 @@ impl BrowserWindow {
             search.set_value(String::new(), window, cx);
             search.set_placeholder(section.search_placeholder(), window, cx);
         });
+        self.reload_library_media(cx);
         cx.notify();
+    }
+
+    /// Scans the user's folders for Media, while Media is showing. Scanning
+    /// only then means macOS asks for folder access when the user is looking
+    /// at Media, not as soon as the library opens.
+    fn reload_library_media(&mut self, cx: &mut Context<Self>) {
+        let library = &self.library;
+        if !library.open || library.section != LibrarySection::Media || library.media_scanning {
+            return;
+        }
+        self.library.media_scanning = true;
+        let storage = Services::get(cx).storage.clone();
+        let task = cx.background_spawn(async move {
+            // Downloads saved outside the scanned folders still count.
+            let downloads = storage.with(|db| db.downloads(200)).unwrap_or_default();
+            let extra = downloads
+                .into_iter()
+                .filter(|record| record.state == "completed")
+                .filter_map(|record| Some((PathBuf::from(record.path?), "Downloads".to_owned())));
+            media::scan_home(extra)
+        });
+        cx.spawn(async move |this, cx| {
+            let files = task.await;
+            let _ = this.update(cx, |this, cx| {
+                this.library.media = Rc::new(files);
+                this.library.media_scanning = false;
+                this.library.media_scanned = true;
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     /// Reloads the download records shown under Media and Downloads.
@@ -401,8 +518,8 @@ impl BrowserWindow {
                 ),
             );
 
-        let body = match self.library.section {
-            LibrarySection::Media => self.render_library_media(&query, &theme),
+        let list = match self.library.section {
+            LibrarySection::Media => None,
             LibrarySection::Downloads => self.render_library_downloads(&query, &theme),
             LibrarySection::Spaces => self.render_library_spaces(&query, &theme, cx),
             LibrarySection::ArchivedTabs => self.render_library_archive(&query, cx),
@@ -412,20 +529,25 @@ impl BrowserWindow {
             | LibrarySection::Aliases
             | LibrarySection::Inbox => None,
         };
-        let body = body.map_or_else(
-            || self.render_library_empty(&query),
-            |list| {
-                div()
-                    .id("library-list")
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_y_scroll()
-                    .px(px(10.))
-                    .pb(px(10.))
-                    .child(list)
-                    .into_any_element()
-            },
-        );
+        let body = if self.library.section == LibrarySection::Media {
+            // Media scrolls itself, rendering only the rows in view.
+            self.render_library_media(&query, &theme)
+        } else {
+            list.map_or_else(
+                || self.render_library_empty(&query),
+                |list| {
+                    div()
+                        .id("library-list")
+                        .flex_1()
+                        .min_h_0()
+                        .overflow_y_scroll()
+                        .px(px(10.))
+                        .pb(px(10.))
+                        .child(list)
+                        .into_any_element()
+                },
+            )
+        };
 
         let pane = v_flex()
             .flex_1()
@@ -506,94 +628,53 @@ impl BrowserWindow {
         (!rows.is_empty()).then(|| v_flex().gap(px(2.)).children(rows).into_any_element())
     }
 
-    fn render_library_media(&self, query: &str, theme: &CurioTheme) -> Option<AnyElement> {
-        let items: Vec<(String, PathBuf, bool)> = self
-            .library
-            .downloads
-            .iter()
-            .filter(|r| r.state == "completed")
-            .filter_map(|r| {
-                let path = r.path.as_deref()?;
-                let ext = extension(path);
-                let image = IMAGE_EXTENSIONS.contains(&ext.as_str());
-                let video = VIDEO_EXTENSIONS.contains(&ext.as_str());
-                let name = download_name(r);
-                ((image || video) && matches(query, &[&name, &r.url]))
-                    .then(|| (name, PathBuf::from(path), image))
-            })
-            .collect();
-        if items.is_empty() {
-            return None;
+    /// Media as a grid of two tiles per row. Only the rows in view are
+    /// rendered, so thousands of files cost no more than a screenful.
+    fn render_library_media(&self, query: &str, theme: &CurioTheme) -> AnyElement {
+        let media = self.library.media.clone();
+        let matching: Rc<Vec<usize>> = Rc::new(
+            media
+                .iter()
+                .enumerate()
+                .filter(|(_, file)| matches(query, &[&file.name, &file.folder]))
+                .map(|(i, _)| i)
+                .collect(),
+        );
+        if matching.is_empty() {
+            if self.library.media_scanning && !self.library.media_scanned {
+                return EmptyState::new("Looking for images and videos…")
+                    .icon(IconName::Images)
+                    .into_any_element();
+            }
+            return self.render_library_empty(query);
         }
-        let tiles: Vec<AnyElement> = items
-            .into_iter()
-            .enumerate()
-            .map(|(i, (name, path, image))| {
-                let preview = if image {
-                    let faint = theme.text_faint;
-                    img(path.clone())
-                        .size_full()
-                        .object_fit(ObjectFit::Cover)
-                        .with_fallback(move || {
-                            div()
-                                .text_color(faint)
-                                .child(Icon::new(IconName::Image))
-                                .into_any_element()
-                        })
-                        .into_any_element()
-                } else {
-                    div()
-                        .text_color(theme.text_faint)
-                        .child(Icon::new(IconName::Film).size(px(24.)))
-                        .into_any_element()
-                };
-                v_flex()
-                    .id(SharedString::from(format!("media-{i}")))
-                    .flex_1()
-                    .min_w_0()
-                    .gap(px(4.))
-                    .cursor_pointer()
-                    .hover(|s| s.opacity(0.85))
-                    .child(
-                        div()
-                            .h(px(96.))
-                            .w_full()
-                            .rounded(px(10.))
-                            .overflow_hidden()
-                            .surface(theme)
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .child(preview),
-                    )
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(theme.text_muted)
-                            .truncate()
-                            .child(SharedString::from(name)),
-                    )
-                    .tooltip_text("Show in Finder")
-                    .on_click(move |_, _, cx| cx.reveal_path(&path))
-                    .into_any_element()
-            })
-            .collect();
-        // Two tiles per row; an odd last tile keeps its column width.
-        let mut rows = Vec::new();
-        let mut tiles = tiles.into_iter();
-        while let Some(first) = tiles.next() {
-            let second = tiles
-                .next()
-                .unwrap_or_else(|| div().flex_1().into_any_element());
-            rows.push(
-                h_flex()
-                    .gap(px(8.))
-                    .items_start()
-                    .child(first)
-                    .child(second),
-            );
-        }
-        Some(v_flex().gap(px(10.)).children(rows).into_any_element())
+
+        let theme = *theme;
+        let thumbnails = self.library.thumbnails.clone();
+        let rows = matching.len().div_ceil(2);
+        uniform_list("library-media", rows, move |range, _, cx| {
+            range
+                .map(|row| {
+                    let mut tiles = (row * 2..(row * 2 + 2).min(matching.len()))
+                        .map(|i| media_tile(i, &media[matching[i]], &thumbnails, &theme, cx));
+                    let first = tiles.next();
+                    // An odd last tile keeps its column width.
+                    let second = tiles
+                        .next()
+                        .unwrap_or_else(|| div().flex_1().into_any_element());
+                    h_flex()
+                        .pb(px(10.))
+                        .gap(px(8.))
+                        .items_start()
+                        .children(first)
+                        .child(second)
+                })
+                .collect()
+        })
+        .flex_1()
+        .min_h_0()
+        .px(px(10.))
+        .into_any_element()
     }
 
     fn render_library_spaces(
@@ -634,7 +715,7 @@ impl BrowserWindow {
             let header = ListItem::new(SharedString::from(format!("library-space-{id}")))
                 .h(px(32.))
                 .gap(px(8.))
-                .leading(ColorDot::new(CurioTheme::swatch(space.color)))
+                .leading(ColorDot::new(CurioTheme::gradient_swatch(space.gradient)))
                 .title(format!("{}  {}", space.icon, space.name))
                 .title_weight(FontWeight::SEMIBOLD)
                 .text_color(theme.text)
@@ -667,24 +748,28 @@ impl BrowserWindow {
         (!groups.is_empty()).then(|| v_flex().gap(px(12.)).children(groups).into_any_element())
     }
 
+    /// Closed tabs, newest first, each with a dot in its space's color.
     fn render_library_archive(&self, query: &str, cx: &mut Context<Self>) -> Option<AnyElement> {
         let rows: Vec<AnyElement> = self
             .workspace
             .closed_tabs()
-            .filter(|closed| matches(query, &[&closed.tab.display_title(), &closed.tab.url]))
-            .map(|closed| {
-                let id = closed.tab.id;
+            .filter_map(|closed| {
+                let space = self.workspace.space(closed.space)?;
                 let title = closed.tab.display_title();
+                matches(query, &[&title, &closed.tab.url, &space.name])
+                    .then_some((closed, space, title))
+            })
+            .map(|(closed, space, title)| {
+                let id = closed.tab.id;
                 let host = display_host(&closed.tab.url);
-                let subtitle = match self.workspace.space(closed.space) {
-                    Some(space) => format!("{host} · {}", space.name),
-                    None => host,
-                };
                 ListItem::new(SharedString::from(format!("archived-{id}")))
                     .leading(Favicon::new(title.clone()).url(closed.tab.favicon_url.as_deref()))
                     .title(title)
-                    .subtitle(subtitle)
-                    .tooltip_text("Reopen Tab")
+                    .subtitle(format!("{host} · {}", space.name))
+                    .tooltip_text(format!("Reopen in {}", space.name))
+                    .child(
+                        ColorDot::new(CurioTheme::gradient_swatch(space.gradient)).diameter(px(8.)),
+                    )
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.reopen_archived_tab(id, window, cx);
                     }))
@@ -710,11 +795,5 @@ mod tests {
             ]
         ));
         assert!(!matches("rust python", &["The Rust Book"]));
-    }
-
-    #[test]
-    fn media_extensions_are_case_insensitive() {
-        assert_eq!(extension("/tmp/Photo.JPG"), "jpg");
-        assert_eq!(extension("/tmp/archive"), "");
     }
 }

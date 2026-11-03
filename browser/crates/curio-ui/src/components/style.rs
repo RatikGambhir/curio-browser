@@ -10,7 +10,7 @@ use gpui_kit::component::h_flex;
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::{
     Action, Div, InteractiveElement, MouseButton, Pixels, SharedString, StatefulInteractiveElement,
-    Styled, div, linear_color_stop, linear_gradient, px,
+    Styled, div, px,
 };
 
 use crate::theme::{CurioTheme, metrics};
@@ -35,16 +35,6 @@ pub trait CurioStyled: Styled + Sized {
             .border_1()
             .border_color(theme.card_border)
             .shadow_md()
-    }
-
-    /// The space-tinted gradient behind the window chrome.
-    #[must_use]
-    fn chrome_gradient(self, theme: &CurioTheme) -> Self {
-        self.bg(linear_gradient(
-            180.,
-            linear_color_stop(theme.chrome_top, 0.),
-            linear_color_stop(theme.chrome_bottom, 1.),
-        ))
     }
 
     /// The lifted look of the selected row or tab on the chrome.

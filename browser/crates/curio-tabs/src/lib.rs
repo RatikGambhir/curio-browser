@@ -31,7 +31,8 @@ pub enum Item {
 
 /// Where a tab is inserted or moved to. Positions are expressed relative to
 /// other items so they remain valid while the moved tab is detached.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Placement {
     /// First position of a section.
     SectionStart(Section),

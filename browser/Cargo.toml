@@ -45,6 +45,8 @@ ureq = { version = "3", features = ["json"] }
 async-channel = "2"
 dirs = "7"
 tempfile = "3"
+# Media thumbnails. Same version and formats GPUI already decodes with.
+image = { version = "0.25", default-features = false, features = ["bmp", "gif", "jpeg", "png", "tiff", "webp"] }
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

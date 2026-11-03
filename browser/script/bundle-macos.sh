@@ -67,6 +67,9 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>NSCameraUsageDescription</key><string>Websites you allow can use your camera, for example for video calls.</string>
   <key>NSMicrophoneUsageDescription</key><string>Websites you allow can use your microphone, for example for video calls.</string>
   <key>NSLocationWhenInUseUsageDescription</key><string>Websites you allow can use your location.</string>
+  <key>NSDesktopFolderUsageDescription</key><string>Curio shows the images and videos on your Desktop in the Library's Media section.</string>
+  <key>NSDocumentsFolderUsageDescription</key><string>Curio shows the images and videos in your Documents folder in the Library's Media section.</string>
+  <key>NSDownloadsFolderUsageDescription</key><string>Curio shows your downloaded images and videos in the Library's Media section.</string>
   <key>CFBundleURLTypes</key>
   <array>
     <dict>

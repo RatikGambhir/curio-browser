@@ -8,10 +8,11 @@ use curio_core::chat::{
 };
 use curio_core::time::{Timestamp, now_ms};
 use curio_core::{
-    AccentColor, ConversationId, Favorite, FavoriteId, GroupId, SpaceId, Tab, TabGroup, TabId,
+    AccentColor, ConversationId, Favorite, FavoriteId, GroupId, SpaceGradient, SpaceId, Tab,
+    TabGroup, TabId,
 };
 use curio_settings::Settings;
-use curio_spaces::{Space, Workspace};
+use curio_spaces::{ClosedTab, Space, Workspace};
 use curio_tabs::{Item, TabStrip};
 use rusqlite::{Connection, OptionalExtension, params};
 
@@ -178,12 +179,12 @@ impl Database {
         let tx = self.conn.transaction()?;
         tx.execute_batch(
             "DELETE FROM spaces; DELETE FROM tabs; DELETE FROM tab_groups;
-             DELETE FROM layout; DELETE FROM favorites;",
+             DELETE FROM layout; DELETE FROM favorites; DELETE FROM closed_tabs;",
         )?;
         {
             let mut insert_space = tx.prepare(
-                "INSERT INTO spaces (id, position, name, icon, color, active_tab)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                "INSERT INTO spaces (id, position, name, icon, color, active_tab, gradient)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             )?;
             let mut insert_tab = tx.prepare(
                 "INSERT INTO tabs (id, owner_kind, owner_id, url, title, favicon_url, home_url,
@@ -224,8 +225,10 @@ impl Database {
                     position as i64,
                     space.name,
                     space.icon,
-                    enum_str(&space.color),
+                    // Kept for older builds reading this database.
+                    enum_str(&space.gradient.legacy_accent()),
                     space.active_tab.map(|t| t.to_string()),
+                    enum_str(&space.gradient),
                 ])?;
                 let (tabs, groups, pinned, unpinned) = space.strip.parts();
                 for tab in tabs {
@@ -271,6 +274,13 @@ impl Database {
                 insert_favorite.execute(params![favorite.id.to_string(), position as i64])?;
                 write_tab(&favorite.tab, "favorite", favorite.id.to_string())?;
             }
+            let mut insert_closed =
+                tx.prepare("INSERT INTO closed_tabs (position, data) VALUES (?1, ?2)")?;
+            for (position, closed) in workspace.closed_tabs().enumerate() {
+                let data = serde_json::to_string(closed)
+                    .map_err(|error| StorageError::Corrupt(error.to_string()))?;
+                insert_closed.execute(params![position as i64, data])?;
+            }
         }
         tx.execute(
             "INSERT INTO kv (key, value) VALUES ('active_space', ?1)
@@ -279,6 +289,23 @@ impl Database {
         )?;
         tx.commit()?;
         Ok(())
+    }
+
+    /// Closed tabs saved with the session, newest first. Rows that can't be
+    /// read (for example from a newer build) are skipped.
+    fn load_closed_tabs(&self) -> Result<Vec<ClosedTab>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT data FROM closed_tabs ORDER BY position")?;
+        let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+        let mut closed = Vec::new();
+        for row in rows {
+            match serde_json::from_str::<ClosedTab>(&row?) {
+                Ok(tab) => closed.push(tab),
+                Err(error) => tracing::warn!(%error, "skipping unreadable closed tab"),
+            }
+        }
+        Ok(closed)
     }
 
     /// Loads the stored workspace, or `None` when nothing was saved yet.
@@ -377,7 +404,7 @@ impl Database {
         let mut spaces = Vec::new();
         {
             let mut stmt = self.conn.prepare(
-                "SELECT id, name, icon, color, active_tab FROM spaces ORDER BY position",
+                "SELECT id, name, icon, color, active_tab, gradient FROM spaces ORDER BY position",
             )?;
             let rows = stmt.query_map([], |r| {
                 Ok((
@@ -386,10 +413,11 @@ impl Database {
                     r.get::<_, String>(2)?,
                     r.get::<_, String>(3)?,
                     r.get::<_, Option<String>>(4)?,
+                    r.get::<_, Option<String>>(5)?,
                 ))
             })?;
             for row in rows {
-                let (id, name, icon, color, active_tab) = row?;
+                let (id, name, icon, color, active_tab, gradient) = row?;
                 let mut groups = groups_by_space.remove(&id).unwrap_or_default();
                 let mut pinned = Vec::new();
                 let mut unpinned = Vec::new();
@@ -420,7 +448,10 @@ impl Database {
                     id: parse_id::<SpaceId>(&id)?,
                     name,
                     icon,
-                    color: parse_enum::<AccentColor>(&color),
+                    gradient: gradient.map_or_else(
+                        || SpaceGradient::from_accent(parse_enum::<AccentColor>(&color)),
+                        |g| parse_enum::<SpaceGradient>(&g),
+                    ),
                     strip,
                     active_tab,
                 });
@@ -449,6 +480,7 @@ impl Database {
         }
 
         let mut workspace = Workspace::with_spaces(spaces, favorites);
+        workspace.restore_closed_tabs(self.load_closed_tabs()?);
         if let Some(active) = self.kv_get("active_space")?
             && let Ok(active) = active.parse::<SpaceId>()
         {
@@ -978,6 +1010,56 @@ mod tests {
         ws.add_favorite("https://fav.test", "Fav", None);
         ws.switch_space(b);
         ws
+    }
+
+    #[test]
+    fn closed_tabs_survive_a_restart_newest_first() {
+        let mut db = Database::open_in_memory().expect("db");
+        let mut ws = sample_workspace();
+        let ids: Vec<TabId> = ws.spaces()[0]
+            .strip
+            .ordered_tab_ids()
+            .into_iter()
+            .take(2)
+            .collect();
+        assert_eq!(ids.len(), 2, "sample workspace has two tabs to close");
+        ws.close_tab(ids[0]).expect("tab exists");
+        ws.close_tab(ids[1]).expect("tab exists");
+        db.save_workspace(&ws).expect("save");
+
+        let loaded = db.load_workspace().expect("load").expect("saved");
+        let order: Vec<TabId> = loaded.closed_tabs().map(|c| c.tab.id).collect();
+        assert_eq!(order, vec![ids[1], ids[0]]);
+        assert_eq!(
+            loaded.closed_tabs().collect::<Vec<_>>(),
+            ws.closed_tabs().collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn space_gradients_round_trip_and_old_spaces_get_one() {
+        let mut db = Database::open_in_memory().expect("db");
+        let mut ws = sample_workspace();
+        let id = ws.active_space_id();
+        ws.set_space_gradient(id, SpaceGradient::Forest);
+        db.save_workspace(&ws).expect("save");
+        let loaded = db.load_workspace().expect("load").expect("saved");
+        assert_eq!(
+            loaded.space(id).map(|s| s.gradient),
+            Some(SpaceGradient::Forest)
+        );
+
+        // A space saved before themes has only an accent color.
+        db.conn
+            .execute("UPDATE spaces SET gradient = NULL, color = 'coral'", [])
+            .expect("update");
+        let loaded = db.load_workspace().expect("load").expect("saved");
+        assert!(
+            loaded
+                .spaces()
+                .iter()
+                .all(|s| s.gradient == SpaceGradient::PeachGlow)
+        );
     }
 
     #[test]
