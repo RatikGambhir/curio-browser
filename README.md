@@ -54,6 +54,8 @@ cd curio-browser/browser
 cargo run --release
 ```
 
+Curio also runs on iPhone and iPad: see [`ios/README.md`](ios/README.md) for the native Swift and UIKit app.
+
 The repository has two independent Cargo workspaces:
 
 ```

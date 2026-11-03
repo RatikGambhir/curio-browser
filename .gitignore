@@ -16,3 +16,9 @@ browser/dist/
 .idea/
 .vscode/
 *.swp
+
+# Xcode (ios/)
+xcuserdata/
+*.xcuserstate
+DerivedData/
+ios/build/
