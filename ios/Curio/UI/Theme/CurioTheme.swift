@@ -1,19 +1,28 @@
 import UIKit
 
 /// Curio's design tokens. The chrome takes its color from the active space,
-/// like Arc: a soft tinted gradient with the page floating on top as a card.
-/// Values match the desktop app exactly.
+/// like Arc: each space has a soft gradient theme behind the chrome, with the
+/// page floating on top as a card. The theme's tone decides whether the
+/// chrome is light or dark, whatever the system appearance (web pages still
+/// follow the Theme setting). Values match the desktop app exactly.
 nonisolated struct CurioTheme: Equatable, Sendable {
     let appearance: Appearance
-    let accentColor: AccentColor
+    let gradient: SpaceGradient
     /// The pure accent, for focus rings and primary buttons.
     let accent: HSLA
     /// A soft accent wash for selected rows and chips.
     let accentSoft: HSLA
     /// Accent-tinted text that stays legible on the chrome.
     let accentText: HSLA
+    /// The gradient's color near the top and bottom of the sidebar, for
+    /// anything that needs a flat approximation of it.
     let chromeTop: HSLA
     let chromeBottom: HSLA
+    /// iOS only: a wash behind the phone's bottom bar. The bar sits on the
+    /// brightest part of a dark theme, so it is deepened with the theme's own
+    /// top color to keep the address and icons readable. Clear on light
+    /// themes.
+    let bottomBarShade: HSLA
     let text: HSLA
     let textMuted: HSLA
     let textFaint: HSLA
@@ -36,20 +45,27 @@ nonisolated struct CurioTheme: Equatable, Sendable {
     let danger: HSLA
     let warning: HSLA
 
-    init(accent accentColor: AccentColor, appearance: Appearance) {
-        self.appearance = appearance
-        self.accentColor = accentColor
-        let base = HSLA(hex: accentColor.rgb)
+    /// Computes tokens for a space theme. Its tone sets the appearance.
+    init(gradient: SpaceGradient) {
+        self.gradient = gradient
+        let base = HSLA(hex: gradient.accentRGB)
         let h = base.h
-        // Graphite is intentionally almost neutral.
-        let tint = accentColor == .graphite ? 0.06 : 1.0
+        // Slate is intentionally almost neutral.
+        let tint = gradient == .slate ? 0.3 : 1.0
+        let spec = gradient.spec
+        func sample(_ y: Float) -> HSLA {
+            let c = spec.sample(x: 0.08, y: y, aspect: 1.6)
+            return HSLA(r: Double(c.x), g: Double(c.y), b: Double(c.z))
+        }
+        chromeTop = sample(0.04)
+        chromeBottom = sample(0.96)
+        appearance = gradient.tone == .light ? .light : .dark
+        bottomBarShade = appearance == .dark ? chromeTop.withAlpha(0.45) : HSLA(0, 0, 0, 0)
         switch appearance {
         case .light:
             accent = base
             accentSoft = base.withAlpha(0.14)
             accentText = HSLA(h, min(base.s * 0.9, 0.85), 0.36)
-            chromeTop = HSLA(h, 0.55 * tint, 0.905)
-            chromeBottom = HSLA((h + 0.03).truncatingRemainder(dividingBy: 1), 0.48 * tint, 0.855)
             text = HSLA(h, 0.12 * tint, 0.13)
             textMuted = HSLA(h, 0.10 * tint, 0.13, 0.80)
             textFaint = HSLA(h, 0.10 * tint, 0.13, 0.55)
@@ -75,8 +91,6 @@ nonisolated struct CurioTheme: Equatable, Sendable {
             accent = HSLA(h, min(base.s, 0.85), max(base.l, 0.62))
             accentSoft = HSLA(h, base.s, 0.62, 0.20)
             accentText = HSLA(h, min(base.s * 0.9, 0.85), 0.78)
-            chromeTop = HSLA(h, 0.24 * tint, 0.155)
-            chromeBottom = HSLA((h + 0.03).truncatingRemainder(dividingBy: 1), 0.20 * tint, 0.115)
             text = HSLA(h, 0.10 * tint, 0.93)
             textMuted = HSLA(h, 0.08 * tint, 0.93, 0.78)
             textFaint = HSLA(h, 0.08 * tint, 0.93, 0.52)
@@ -103,4 +117,7 @@ nonisolated struct CurioTheme: Equatable, Sendable {
 
     /// The base color of an accent, for swatches.
     static func swatch(_ color: AccentColor) -> UIColor { HSLA(hex: color.rgb).uiColor }
+
+    /// A theme's accent, for the small dots that stand for a space.
+    static func swatch(_ gradient: SpaceGradient) -> UIColor { HSLA(hex: gradient.accentRGB).uiColor }
 }

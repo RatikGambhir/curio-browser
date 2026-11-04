@@ -10,11 +10,14 @@ final class BottomBarView: UIView, ThemeObserving {
     let assistantButton = IconButton(.sparkles, size: .medium, label: "Curio Assistant")
     let moreButton = IconButton(.ellipsis, size: .medium, label: "More")
     private var loading = false
+    /// Deepens dark themes behind the bar so its text stays readable.
+    private let shade = CAGradientLayer()
     var onCommand: ((CurioCommand) -> Void)?
 
     init() {
         super.init(frame: .zero)
         moreButton.showsMenuAsPrimaryAction = true
+        layer.addSublayer(shade)
         let stack = UIStackView(arrangedSubviews: [sidebarButton, backButton, forwardButton, pill, assistantButton, moreButton])
         stack.spacing = 4
         stack.alignment = .center
@@ -54,5 +57,20 @@ final class BottomBarView: UIView, ThemeObserving {
         assistantButton.isToggled = assistantOpen
     }
 
-    func themeDidChange(_ theme: CurioTheme) {}
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        // Fade in across the padding above the controls, so the shade has no
+        // hard edge and never reaches the page card above the bar.
+        let fade: CGFloat = 6
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        shade.frame = bounds
+        shade.locations = [0, NSNumber(value: Double(fade / max(bounds.height, 1)))]
+        CATransaction.commit()
+    }
+
+    func themeDidChange(_ theme: CurioTheme) {
+        let color = theme.bottomBarShade.uiColor
+        shade.colors = [color.withAlphaComponent(0).cgColor, color.cgColor]
+    }
 }

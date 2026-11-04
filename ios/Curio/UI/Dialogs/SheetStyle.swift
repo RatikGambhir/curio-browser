@@ -14,7 +14,6 @@ enum SheetStyle {
         navigation.navigationBar.standardAppearance = appearance
         navigation.navigationBar.scrollEdgeAppearance = appearance
         navigation.navigationBar.tintColor = theme.accentText.uiColor
-        navigation.overrideUserInterfaceStyle = theme.appearance.interfaceStyle
         if compact {
             navigation.modalPresentationStyle = .pageSheet
             if let sheet = navigation.sheetPresentationController {

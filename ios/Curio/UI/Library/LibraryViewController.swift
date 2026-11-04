@@ -223,7 +223,7 @@ final class LibraryViewController: UIViewController, ThemeObserving {
                 self?.session.switchSpace(space.id)
                 self?.delegate?.libraryDidClose()
             })
-            header.row.setLeading(ColorDotView(color: CurioTheme.swatch(space.color)))
+            header.row.setLeading(ColorDotView(color: CurioTheme.swatch(space.gradient)))
             header.row.setTitle("\(space.icon)  \(space.name)")
             header.row.titleWeight = .semibold
             header.row.setSpacing(8)
@@ -254,16 +254,18 @@ final class LibraryViewController: UIViewController, ThemeObserving {
 
     private func archiveRows(_ query: String) -> [UIView] {
         list.spacing = 2
-        let workspace = session.workspace
-        return workspace.closedTabs.filter { Self.matches(query, [$0.tab.displayTitle, $0.tab.url]) }.map { closed in
+        return session.workspace.archivedTabs(matching: query).map { closed, space in
             let host = Curio.displayHost(closed.tab.url)
-            let subtitle = workspace.space(closed.space).map { "\(host) · \($0.name)" } ?? host
-            let control = row(title: closed.tab.displayTitle, subtitle: subtitle, favicon: closed.tab.faviconURL, label: closed.tab.displayTitle) { [weak self] in
+            let title = closed.tab.displayTitle
+            let control = row(title: title, subtitle: "\(host) · \(space.name)", favicon: closed.tab.faviconURL, label: title) { [weak self] in
                 self?.session.reopenArchivedTab(closed.tab.id)
                 self?.delegate?.libraryDidClose()
             }
-            control.toolTip = "Reopen Tab"
-            control.accessibilityHint = "Reopens the tab"
+            // The space's dot, so it's clear at a glance where the tab was.
+            control.row.trailingStack.addArrangedSubview(ColorDotView(color: CurioTheme.swatch(space.gradient)))
+            control.toolTip = "Reopen in \(space.name)"
+            control.accessibilityLabel = "\(title), \(host), closed in \(space.name)"
+            control.accessibilityHint = "Reopens the tab in \(space.name)"
             return control
         }
     }

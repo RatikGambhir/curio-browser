@@ -37,10 +37,10 @@ Everything from the desktop app, adapted for touch:
 
 - **Browsing** with WebKit (the same engine as the desktop app): back/forward swipes, reload, stop, zoom, print, find in page, downloads (saved to Files › Curio › Downloads), and Safari Web Inspector.
 - **Command bar** for addresses, search, open tabs, history, bookmarks, commands and questions for the assistant. All six search engines plus custom URLs.
-- **Spaces** with their own name, icon, color, tabs, pinned tabs and folders. The chrome cross-fades to each space's color. Switch spaces with the footer dots or a horizontal swipe (or a two-finger trackpad swipe).
+- **Spaces** with their own name, icon, theme, tabs, pinned tabs and folders. Each space picks one of 20 gradient themes (10 light, 10 dark), and the theme decides whether that space's chrome is light or dark; web pages follow the Theme setting. The chrome cross-fades between themes when you switch spaces. Switch spaces with the footer dots or a horizontal swipe (or a two-finger trackpad swipe).
 - **Tabs**: vertical sidebar or horizontal strip, pinned tabs, global favorites, folders (rename, recolor, collapse, ungroup, move to another space), drag and drop to reorder, pin, group, favorite or move tabs, swipe a tab to close or pin it, reopen closed tabs, and tab sleeping to save memory.
 - **Assistant**: streaming Markdown answers with copyable code blocks, chats about the current tab, chosen tabs or the whole space, selection actions (Explain, Summarize, Translate, Ask), quick actions, and saved chat history. Works with Anthropic, OpenAI and OpenAI-compatible servers. API keys are stored in the Keychain.
-- **Library** with Media, Downloads, Spaces and Archived Tabs (plus Notes, Calendar, Clipboard History, Aliases and Inbox placeholders, as on desktop).
+- **Library** with Media, Downloads, Spaces and Archived Tabs (newest first, each with its space's dot, and searchable by space name) (plus Notes, Calendar, Clipboard History, Aliases and Inbox placeholders, as on desktop).
 - **Settings** for search, session restore, memory, theme, tab layout, AI providers (with a connection test), privacy and keyboard shortcuts.
 - **Keyboard and menu bar**: every desktop shortcut works with a hardware keyboard, the iPad menu bar shows Curio's menus, and shortcuts can be rebound in Settings.
 - Light and dark themes, Dynamic Type sizes, VoiceOver labels, and Reduce Motion.

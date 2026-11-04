@@ -24,7 +24,5 @@ iOS work builds the Swift version from it.
 | Feature | iOS status |
 | --- | --- |
 | [Media from the user's folders](media-from-user-folders.md) | Not started |
-| [Space gradient themes](space-gradient-themes.md) | Not started |
-| [Archived Tabs: space dot and close time](archived-tabs-space-dot.md) | Not started |
 
 Add a row when you add a spec, and keep its status in step with the file.

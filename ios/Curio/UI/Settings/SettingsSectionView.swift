@@ -193,7 +193,7 @@ final class SettingsSectionView: UIView, UITextFieldDelegate {
             self?.store.update { $0.appearance.tabLayout = TabLayout.allCases[index] }
         }
         return [
-            row("Theme", control: theme),
+            row("Theme", description: "For web pages. The sidebar, menus and assistant follow each space's theme.", control: theme),
             row("Tab layout", description: "Vertical tabs live in the sidebar; horizontal tabs sit above the page. Your tabs stay as they are.", control: layout),
             row("Show sidebar", description: "Hide it to give the page more room; hover the left edge to peek.",
                 control: toggle(settings.appearance.sidebarVisible, label: "Show sidebar") { $0.appearance.sidebarVisible = $1 }),

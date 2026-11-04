@@ -82,10 +82,10 @@ extension BrowserViewController: SidebarDelegate {
         setDrawer(open: false)
         let space = id.flatMap(session.workspace.space)
         let defaults = session.newSpaceDefaults
-        let editor = SpaceEditorViewController(spaceID: id, name: space?.name ?? "", icon: space?.icon ?? defaults.icon, color: space?.color ?? defaults.color)
-        editor.onSave = { [weak self] name, icon, color in
+        let editor = SpaceEditorViewController(spaceID: id, name: space?.name ?? "", icon: space?.icon ?? defaults.icon, gradient: space?.gradient ?? defaults.gradient)
+        editor.onSave = { [weak self] name, icon, gradient in
             guard let self else { return }
-            session.saveSpace(id, name: name, icon: icon, color: color)
+            session.saveSpace(id, name: name, icon: icon, gradient: gradient)
             if id == nil {
                 Task { [weak self] in
                     try? await Task.sleep(for: .milliseconds(450))
@@ -93,7 +93,7 @@ extension BrowserViewController: SidebarDelegate {
                 }
             }
         }
-        presentFromTop(SheetStyle.wrap(editor, compact: isCompact, size: CGSize(width: 440, height: 520), detents: [.large()]))
+        presentFromTop(SheetStyle.wrap(editor, compact: isCompact, size: CGSize(width: 440, height: 640), detents: [.large()]))
     }
 
     func sidebarConfirmDeleteSpace(_ id: UUID) {

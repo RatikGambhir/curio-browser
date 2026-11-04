@@ -1,7 +1,7 @@
 import Foundation
 
 /// The full browser organization: spaces (each with tabs, pinned tabs,
-/// groups, name, icon, color and active tab), global favorites, and recently
+/// groups, name, icon, theme and active tab), global favorites, and recently
 /// closed tabs. It has no engine or UI state, so every operation is
 /// synchronous and unit tested.
 nonisolated struct Workspace: Equatable, Sendable {
@@ -17,11 +17,11 @@ nonisolated struct Workspace: Equatable, Sendable {
     /// space so there is always somewhere to put tabs.
     init(spaces: [Space], favorites: [Favorite], closed: [ClosedTab] = []) {
         var spaces = spaces
-        if spaces.isEmpty { spaces.append(Space(name: "Personal", icon: "✦", color: .iris)) }
+        if spaces.isEmpty { spaces.append(Space(name: "Personal", icon: "✦", gradient: .default)) }
         self.spaces = spaces
         self.favorites = favorites
         activeSpaceID = spaces[0].id
-        closedTabs = closed.filter { closed in spaces.contains { $0.id == closed.space } }
+        closedTabs = Self.restoredClosedTabs(closed, spaces: spaces)
         // Drop active-tab references that no longer resolve.
         for index in self.spaces.indices {
             if let active = self.spaces[index].activeTab, findTab(active) == nil {
@@ -30,11 +30,22 @@ nonisolated struct Workspace: Equatable, Sendable {
         }
     }
 
+    /// Saved closed tabs, ready to use: tabs whose space is gone are
+    /// dropped, the rest are newest first (ties keep their saved order),
+    /// and at most `closedTabLimit` are kept.
+    private static func restoredClosedTabs(_ closed: [ClosedTab], spaces: [Space]) -> [ClosedTab] {
+        let kept = closed.enumerated().filter { item in spaces.contains { $0.id == item.element.space } }
+        let sorted = kept.sorted { a, b in
+            a.element.closedAt != b.element.closedAt ? a.element.closedAt > b.element.closedAt : a.offset < b.offset
+        }
+        return Array(sorted.prefix(closedTabLimit).map(\.element))
+    }
+
     /// A first-run workspace with two starter spaces.
     static func firstRun() -> Workspace {
         Workspace(spaces: [
-            Space(name: "Personal", icon: "✦", color: .iris),
-            Space(name: "Work", icon: "💼", color: .lagoon),
+            Space(name: "Personal", icon: "✦", gradient: .lavenderBlush),
+            Space(name: "Work", icon: "💼", gradient: .skyHaze),
         ], favorites: [])
     }
 
@@ -60,9 +71,9 @@ nonisolated struct Workspace: Equatable, Sendable {
 
     /// Creates a space after the existing ones.
     @discardableResult
-    mutating func createSpace(name: String, icon: String, color: AccentColor?) -> UUID {
-        let color = color ?? spaces.last.map(\.color.next) ?? .iris
-        let space = Space(name: name, icon: icon, color: color)
+    mutating func createSpace(name: String, icon: String, gradient: SpaceGradient?) -> UUID {
+        let gradient = gradient ?? spaces.last.map(\.gradient.next) ?? .default
+        let space = Space(name: name, icon: icon, gradient: gradient)
         spaces.append(space)
         return space.id
     }
@@ -82,8 +93,8 @@ nonisolated struct Workspace: Equatable, Sendable {
     }
 
     @discardableResult
-    mutating func setSpaceColor(_ id: UUID, _ color: AccentColor) -> Bool {
-        updateSpace(id) { $0.color = color }
+    mutating func setSpaceGradient(_ id: UUID, _ gradient: SpaceGradient) -> Bool {
+        updateSpace(id) { $0.gradient = gradient }
     }
 
     /// Deletes a space and its tabs. The last space cannot be deleted.
@@ -204,9 +215,22 @@ nonisolated struct Workspace: Equatable, Sendable {
         let next = spaces[index].strip.neighborForClose(id)
         guard let removed = spaces[index].strip.remove(id) else { return nil }
         if spaces[index].activeTab == id { spaces[index].activeTab = next }
-        closedTabs.insert(ClosedTab(space: spaceID, tab: removed.tab, restoreAt: removed.restoreAt), at: 0)
+        closedTabs.insert(ClosedTab(space: spaceID, tab: removed.tab, restoreAt: removed.restoreAt, closedAt: .now), at: 0)
         if closedTabs.count > Self.closedTabLimit { closedTabs.removeLast(closedTabs.count - Self.closedTabLimit) }
         return (spaceID, spaces[index].activeTab)
+    }
+
+    /// Closed tabs for the Library's Archived Tabs, newest first, with the
+    /// space each came from. Every word of `query` must appear in the tab's
+    /// title, its URL or the space's name.
+    func archivedTabs(matching query: String) -> [(closed: ClosedTab, space: Space)] {
+        let words = query.split(whereSeparator: \.isWhitespace)
+        return closedTabs.compactMap { closed in
+            guard let owner = space(closed.space) else { return nil }
+            let fields = [closed.tab.displayTitle, closed.tab.url, owner.name]
+            let matches = words.allSatisfy { word in fields.contains { $0.localizedStandardContains(word) } }
+            return matches ? (closed, owner) : nil
+        }
     }
 
     /// Reopens the most recently closed tab in its original place.

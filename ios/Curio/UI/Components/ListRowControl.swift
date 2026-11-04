@@ -35,8 +35,10 @@ final class ListRowControl: TapControl {
         }
     }
 
+    /// A label set on the control wins; otherwise the row's title and
+    /// subtitle are read.
     override var accessibilityLabel: String? {
-        get { [row.titleLabel.text, row.subtitleLabel.isHidden ? nil : row.subtitleLabel.text].compactMap(\.self).joined(separator: ", ") }
+        get { super.accessibilityLabel ?? [row.titleLabel.text, row.subtitleLabel.isHidden ? nil : row.subtitleLabel.text].compactMap(\.self).joined(separator: ", ") }
         set { super.accessibilityLabel = newValue }
     }
 }

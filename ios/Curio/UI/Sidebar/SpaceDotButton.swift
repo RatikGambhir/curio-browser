@@ -1,6 +1,6 @@
 import UIKit
 
-/// One space in the footer switcher: a dot in the space's color, larger and
+/// One space in the footer switcher: a dot in the space theme's accent, larger and
 /// solid for the active space. Tabs can be dropped on it to move them.
 final class SpaceDotButton: TapControl {
     let spaceID: UUID
@@ -12,7 +12,7 @@ final class SpaceDotButton: TapControl {
     init(space: Space, active: Bool, action: UIAction) {
         spaceID = space.id
         self.active = active
-        dot = ColorDotView(color: CurioTheme.swatch(space.color), diameter: active ? 8 : 6)
+        dot = ColorDotView(color: CurioTheme.swatch(space.gradient), diameter: active ? 8 : 6)
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         addSubview(dot)

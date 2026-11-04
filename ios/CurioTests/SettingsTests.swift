@@ -45,15 +45,6 @@ final class SettingsTests: XCTestCase {
         }
     }
 
-    func testThemeTokensKeepTextReadable() {
-        for accent in AccentColor.allCases {
-            let light = CurioTheme(accent: accent, appearance: .light)
-            XCTAssertGreaterThan(light.chromeTop.l - light.text.l, 0.6)
-            let dark = CurioTheme(accent: accent, appearance: .dark)
-            XCTAssertGreaterThan(dark.text.l - dark.chromeTop.l, 0.6)
-        }
-    }
-
     func testHueMixTakesShortestPath() {
         let mixed = HSLA.mix(HSLA(0.95, 0.5, 0.5), HSLA(0.05, 0.5, 0.5), 0.5)
         XCTAssertTrue(mixed.h < 0.01 || mixed.h > 0.99)

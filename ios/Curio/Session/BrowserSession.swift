@@ -453,16 +453,16 @@ final class BrowserSession {
     }
 
     /// Creates a space (and switches to it) or edits an existing one.
-    func saveSpace(_ id: UUID?, name: String, icon: String, color: AccentColor) {
+    func saveSpace(_ id: UUID?, name: String, icon: String, gradient: SpaceGradient) {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "New Space" : name
         if let id {
             workspace.renameSpace(id, to: name)
             workspace.setSpaceIcon(id, icon)
-            workspace.setSpaceColor(id, color)
+            workspace.setSpaceGradient(id, gradient)
             delegate?.session(self, didChange: .space(direction: 0))
             changedTabs()
         } else {
-            let id = workspace.createSpace(name: name, icon: icon, color: color)
+            let id = workspace.createSpace(name: name, icon: icon, gradient: gradient)
             switchSpace(id)
         }
     }
@@ -481,10 +481,11 @@ final class BrowserSession {
         scheduleSave()
     }
 
-    /// Icon and color suggested for a new space.
-    var newSpaceDefaults: (icon: String, color: AccentColor) {
-        let color = workspace.spaces.last.map(\.color.next) ?? .iris
-        return (Space.icons[(workspace.spaces.count + 3) % Space.icons.count], color)
+    /// Icon and theme suggested for a new space: the theme after the last
+    /// space's, in the same tone.
+    var newSpaceDefaults: (icon: String, gradient: SpaceGradient) {
+        let gradient = workspace.spaces.last.map(\.gradient.next) ?? .default
+        return (Space.icons[(workspace.spaces.count + 3) % Space.icons.count], gradient)
     }
 
     // MARK: - Page commands

@@ -17,9 +17,11 @@ nonisolated struct HSLA: Equatable, Sendable {
 
     /// Converts `0xRRGGBB`.
     init(hex: UInt32) {
-        let r = Double((hex >> 16) & 0xFF) / 255
-        let g = Double((hex >> 8) & 0xFF) / 255
-        let b = Double(hex & 0xFF) / 255
+        self.init(r: Double((hex >> 16) & 0xFF) / 255, g: Double((hex >> 8) & 0xFF) / 255, b: Double(hex & 0xFF) / 255)
+    }
+
+    /// Converts opaque sRGB components, 0 to 1.
+    init(r: Double, g: Double, b: Double) {
         let maxC = max(r, g, b)
         let minC = min(r, g, b)
         let l = (maxC + minC) / 2

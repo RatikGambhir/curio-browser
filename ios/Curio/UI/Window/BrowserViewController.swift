@@ -100,9 +100,6 @@ final class BrowserViewController: UIViewController, ThemeObserving {
         wireActions()
         toasts = ToastPresenter(host: view)
         services.settings.observe(self) { [weak self] _ in self?.settingsChanged() }
-        registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (self: Self, _: UITraitCollection) in
-            self.applyTheme(animated: false)
-        }
         registerForTraitChanges([UITraitHorizontalSizeClass.self]) { (self: Self, _: UITraitCollection) in
             self.updateMode(for: self.view.bounds.size)
         }
@@ -116,6 +113,13 @@ final class BrowserViewController: UIViewController, ThemeObserving {
         super.viewIsAppearing(animated)
         if !hasLaidOut {
             hasLaidOut = true
+            // The window overrides its light/dark style to match the space,
+            // so the system appearance (which web pages follow) is read from
+            // the scene instead.
+            view.window?.windowScene?.registerForTraitChanges([UITraitUserInterfaceStyle.self]) { [weak self] (_: UIWindowScene, _: UITraitCollection) in
+                self?.applyTheme(animated: false)
+            }
+            applyTheme(animated: false)
             updateMode(for: view.bounds.size, animated: false)
             // An empty space opens on the command bar, like a fresh Arc window.
             if session.activeTab?.isNewTabPage ?? true {
@@ -189,6 +193,7 @@ final class BrowserViewController: UIViewController, ThemeObserving {
         embed(assistant, in: aiCard.contentView)
 
         drawer.clipsToBounds = true
+        drawerBackground.style = .sidebar
         drawer.layer.cornerCurve = .continuous
         drawerBackground.translatesAutoresizingMaskIntoConstraints = false
         drawer.addSubview(drawerBackground)
@@ -328,19 +333,20 @@ final class BrowserViewController: UIViewController, ThemeObserving {
 
     // MARK: - Theme
 
-    /// Applies the active space's accent and the light/dark setting.
+    /// Applies the active space's theme to the chrome (its tone sets light
+    /// or dark), and the Theme setting to web pages.
     func applyTheme(animated: Bool) {
-        let appearance = Appearance.resolve(settings.appearance.theme, system: traitCollection.userInterfaceStyle)
-        let accent: AccentColor = settings.appearance.tintChromeWithSpace ? session.workspace.activeSpace.color : .graphite
+        let gradient = session.workspace.activeSpace.gradient
         ThemeCenter.shared.reduceMotion = settings.appearance.reduceMotion
-        ThemeCenter.shared.apply(accent: accent, appearance: appearance)
+        ThemeCenter.shared.apply(gradient: gradient)
         let theme = ThemeCenter.shared.theme
         let duration = animated && ThemeCenter.shared.motionEnabled ? 0.32 : 0
-        chrome.setColors(theme.chromeTop.uiColor, theme.chromeBottom.uiColor, duration: duration)
-        drawerBackground.setColors(theme.chromeTop.uiColor, theme.chromeBottom.uiColor, duration: duration)
-        view.window?.overrideUserInterfaceStyle = settings.appearance.theme == .system ? .unspecified : appearance.interfaceStyle
+        chrome.setGradient(gradient, duration: duration)
+        drawerBackground.setGradient(gradient, duration: duration)
+        view.window?.overrideUserInterfaceStyle = theme.appearance.interfaceStyle
         view.window?.tintColor = theme.accent.uiColor
-        session.setAppearance(appearance.interfaceStyle)
+        let system = view.window?.windowScene?.traitCollection.userInterfaceStyle ?? .unspecified
+        session.setAppearance(Appearance.resolve(settings.appearance.theme, system: system).interfaceStyle)
     }
 
     private var lastLayoutSettings: AppearanceSettings?

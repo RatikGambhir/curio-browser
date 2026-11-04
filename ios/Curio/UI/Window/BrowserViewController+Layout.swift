@@ -259,7 +259,6 @@ extension BrowserViewController {
         sheetLibrary.delegate = self
         let theme = ThemeCenter.shared.theme
         sheetLibrary.view.backgroundColor = theme.surface.uiColor
-        sheetLibrary.overrideUserInterfaceStyle = theme.appearance.interfaceStyle
         sheetLibrary.modalPresentationStyle = isCompact ? .pageSheet : .formSheet
         sheetLibrary.preferredContentSize = CGSize(width: 520, height: 600)
         if let sheet = sheetLibrary.sheetPresentationController {
@@ -313,7 +312,6 @@ extension BrowserViewController {
         guard presentedAssistantSheet == nil else { return }
         hideAssistantColumnHost()
         assistant.presentedAsSheet = true
-        assistant.overrideUserInterfaceStyle = ThemeCenter.shared.theme.appearance.interfaceStyle
         assistant.modalPresentationStyle = .pageSheet
         if let sheet = assistant.sheetPresentationController {
             sheet.detents = [.medium(), .large()]

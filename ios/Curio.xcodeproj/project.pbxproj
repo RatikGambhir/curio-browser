@@ -15,6 +15,7 @@
 		070A4D8BD8A3505066773293 /* AccentColor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81DD4B511C69E42028C8DAF1 /* AccentColor.swift */; };
 		07809F158F53CF0B97434FF5 /* ToastPresenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE6D79552D949E1820900A54 /* ToastPresenter.swift */; };
 		07E41953D9533D2E3AFCEE19 /* EmptyStateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A68716095F70469B9550919 /* EmptyStateView.swift */; };
+		0934BF818EA3C9B56CFB1E8C /* SpaceGradientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4730DB584C830A73A10D3BE6 /* SpaceGradientTests.swift */; };
 		0A7497ABE5CAA1707F9F4ADE /* PageNav.swift in Sources */ = {isa = PBXBuildFile; fileRef = D884A832BF849709DE23F70D /* PageNav.swift */; };
 		0B1EB8A6834A4644CC0EABC9 /* ChatMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1A6133438CF7482966A0BF6 /* ChatMessage.swift */; };
 		0B8BA6D28F9FF8E773BD21DC /* Shadow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 404D861413AD2D3862DD030B /* Shadow.swift */; };
@@ -171,6 +172,7 @@
 		BE80DBA57E986807B75BB059 /* Omnibox.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF88BE3F18DC84091637AB14 /* Omnibox.swift */; };
 		BE9F1FE291B9AC235C7D1A9D /* AIProviderKind.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBECEC54507125192FA06647 /* AIProviderKind.swift */; };
 		BEA408BEC21A123E2EA86217 /* HistoryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65D3F2B9B8076189DBE5907C /* HistoryStore.swift */; };
+		BEB364AFC0E1001C01D94456 /* SpaceGradient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29B032D786A25BC238BF270E /* SpaceGradient.swift */; };
 		C0AB58B07AB6056151D333BB /* GroupPlacement.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A5A9367970E884F79224551 /* GroupPlacement.swift */; };
 		C0CE6F5DD04F496035888EBF /* AssistantMessageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF8D5130EC50FA36A2C7F74E /* AssistantMessageView.swift */; };
 		C49C65A00CD0634D733E0490 /* BrowserTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = C59FB265F2CFF308EBCC3E30 /* BrowserTab.swift */; };
@@ -260,6 +262,7 @@
 		26F4BD16DA29FCCDB72C08D5 /* FindResult.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FindResult.swift; sourceTree = "<group>"; };
 		28605B0FC769B5B6EFC16857 /* TabStripTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabStripTests.swift; sourceTree = "<group>"; };
 		28DC6A1B41F81022ACD6A34E /* ChatRequest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatRequest.swift; sourceTree = "<group>"; };
+		29B032D786A25BC238BF270E /* SpaceGradient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpaceGradient.swift; sourceTree = "<group>"; };
 		2DF6BCBB588948CF63CA9C01 /* PageBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PageBarView.swift; sourceTree = "<group>"; };
 		2DFCF79CB32988CCF7EAB9F7 /* SelectionActionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelectionActionsView.swift; sourceTree = "<group>"; };
 		2E18A486881BDBAB329754C8 /* BrowserSessionDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserSessionDelegate.swift; sourceTree = "<group>"; };
@@ -279,6 +282,7 @@
 		433C71AC2B56E8557BB16C61 /* ComposerTextView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerTextView.swift; sourceTree = "<group>"; };
 		43D4967FD5681E69B3ED6D66 /* AppServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppServices.swift; sourceTree = "<group>"; };
 		46D7E44019A17FDD2B193667 /* BookmarkStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookmarkStore.swift; sourceTree = "<group>"; };
+		4730DB584C830A73A10D3BE6 /* SpaceGradientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpaceGradientTests.swift; sourceTree = "<group>"; };
 		474CC6548C9DE71259BB38F8 /* Favorite.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Favorite.swift; sourceTree = "<group>"; };
 		47C1D201614736B3481EE0EA /* SidebarSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarSection.swift; sourceTree = "<group>"; };
 		485DF320113DA609DF64B48B /* ThemeCenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemeCenter.swift; sourceTree = "<group>"; };
@@ -509,6 +513,7 @@
 				C7074C0186954DF4B8F0CCEF /* AITests.swift */,
 				E54432A32005BDDAD7023B41 /* OmniboxTests.swift */,
 				1D315B64341E99CC8CD01C74 /* SettingsTests.swift */,
+				4730DB584C830A73A10D3BE6 /* SpaceGradientTests.swift */,
 				28605B0FC769B5B6EFC16857 /* TabStripTests.swift */,
 				B4662A1A089A19D99826039D /* WorkspaceTests.swift */,
 			);
@@ -822,6 +827,7 @@
 			children = (
 				8403DFDAEC433AE8790BECC1 /* ClosedTab.swift */,
 				3CE7EDDE1DBFEBD748584E31 /* Space.swift */,
+				29B032D786A25BC238BF270E /* SpaceGradient.swift */,
 				8CBD1AF2F85E43E5440E3CF5 /* TabOwner.swift */,
 				7B09DC36A58C53079781F7FF /* Workspace.swift */,
 			);
@@ -1092,6 +1098,7 @@
 				7A78008CF868648859872E6B /* Space.swift in Sources */,
 				7B1FF6A59D150747F8EF30F7 /* SpaceDotButton.swift in Sources */,
 				C85C2F5C97C10D3BBB596366 /* SpaceEditorViewController.swift in Sources */,
+				BEB364AFC0E1001C01D94456 /* SpaceGradient.swift in Sources */,
 				559D989DE1B9F086BD46AF94 /* SpaceHeaderCell.swift in Sources */,
 				0C1ABA8AF22F62A1E4395318 /* StalledBannerView.swift in Sources */,
 				B01D575C17E8BC9EA1752924 /* StopReason.swift in Sources */,
@@ -1140,6 +1147,7 @@
 				A69DD9D2B636753BD5F183C5 /* AITests.swift in Sources */,
 				C6E4B9B6EBBA275FC97D4C0F /* OmniboxTests.swift in Sources */,
 				94E077C9BB5CDEADAC44332B /* SettingsTests.swift in Sources */,
+				0934BF818EA3C9B56CFB1E8C /* SpaceGradientTests.swift in Sources */,
 				30497296EF4DBF500F97AA61 /* TabStripTests.swift in Sources */,
 				7E865A52F07801DC0873EAF0 /* WorkspaceTests.swift in Sources */,
 			);
