@@ -273,9 +273,13 @@ impl BrowserWindow {
             .border_b_1()
             .border_color(theme.divider)
             .window_drag_area()
-            // Without a left column the traffic lights sit over the card.
-            .when(!self.left_column_visible(cx), |el| {
-                el.child(traffic_lights_spacer(px(16.)))
+            // Without a left column the traffic lights sit over the card;
+            // their space opens up as the sidebar slides away.
+            .when(self.left_reveal < 1.0, |el| {
+                el.child(
+                    traffic_lights_spacer(px(16.))
+                        .w((metrics::TRAFFIC_LIGHTS_WIDTH - px(16.)) * (1.0 - self.left_reveal)),
+                )
             })
             .child(
                 IconButton::new("tool-sidebar", IconName::PanelLeft)

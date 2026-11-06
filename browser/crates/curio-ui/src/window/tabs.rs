@@ -132,17 +132,13 @@ impl BrowserWindow {
         let space = after
             .and_then(|t| self.workspace.space_of_tab(t))
             .unwrap_or_else(|| self.workspace.active_space_id());
-        let placement = match after {
-            Some(after)
-                if self
-                    .workspace
-                    .space(space)
-                    .is_some_and(|s| !s.strip.is_pinned(after)) =>
-            {
-                Placement::AfterTab(after)
-            }
-            _ => Placement::SectionStart(Section::Unpinned),
-        };
+        // Next to `after`, but never inside a folder or the pinned section.
+        let placement = self
+            .workspace
+            .space(space)
+            .map_or(Placement::SectionStart(Section::Unpinned), |s| {
+                s.strip.placement_for_new_tab(after)
+            });
         self.workspace.open_tab(space, tab, placement, false);
         if activate {
             self.activate_tab(id, window, cx);

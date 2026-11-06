@@ -22,8 +22,8 @@ Curio is a desktop web browser. Every piece of its own interface (sidebar, tab s
 
 **Tabs and spaces (Arc-inspired)**
 - Vertical tabs in a sidebar by default, or a traditional horizontal tab strip (⌥⌘T). Switching keeps every tab live; nothing reloads.
-- **Pinned tabs** per space, which unload instead of closing. **Favorites** are global across spaces and keep their own page state.
-- **Folders (tab groups)**: create, rename, recolor, collapse, reorder, ungroup, close, and move to another space.
+- **Pinned tabs** per space, which unload instead of closing. **Favorites** are global across spaces and keep their own page state. They sit in a grid at the top of the sidebar, four to a row (three when the sidebar is narrow), with a dashed tile in the next slot: click it to add the current tab, or drop a tab on the grid.
+- **Folders**, Arc-style, in the sidebar: make an empty one (⌥⌘N, or right-click empty sidebar space) or one from a tab (⌥⌘G), double-click to rename in place, click to collapse, recolor, reorder, ungroup, delete, and move to another space. New tabs open below the folder, never inside it. Tabs in a folder are saved: closing one (⌘W) unloads it and resets it to the page it was saved with, and **Delete Tab** removes it. Folders, their names, colors, collapsed state and tabs are saved with the session.
 - Drag and drop to reorder tabs, move them into or out of folders, pin them (drop above the line), favorite them, or move them to another space (drop on a space icon).
 - **Spaces** with their own name, icon, theme, tabs, pinned tabs, folders and active tab. Switch with the space bar, Ctrl-1…9, ⌃⌘←/→ or a two-finger horizontal swipe on the sidebar. The window chrome cross-fades to the space's theme.
 - **Space themes**: 20 soft, atmospheric gradients (10 light, such as Lavender Blush, Sky Haze and Peach Glow, and 10 dark, such as Midnight Indigo, Forest and Ember), each with several color stops and faint ambient glows. A space's theme decides whether its sidebar, menus and assistant are light or dark; web pages follow the Theme setting.
@@ -31,7 +31,7 @@ Curio is a desktop web browser. Every piece of its own interface (sidebar, tab s
 - Reopen closed tabs (⌘⇧T), duplicate, close others, copy link.
 
 **Library**
-- An Arc-style library in place of the sidebar, with Media, Downloads, Spaces and Archived Tabs (plus Notes, Calendar, Clipboard History, Aliases and Inbox placeholders).
+- An Arc-style library in place of the sidebar, with Media, Downloads, Spaces and Archived Tabs (plus a Clipboard History placeholder; Notes, Calendar, Aliases and Inbox are hidden until they're built). Archived Tabs are kept across restarts, even after their space is deleted.
 - **Media** shows the images and videos on your Mac, newest first: everything in Desktop, Documents, Downloads, Pictures and Movies (and loose files in your home folder), plus downloads saved anywhere else. Search by file or folder name; click a tile to show it in Finder. It skips hidden folders, app and Photos libraries, and build folders such as `node_modules`. macOS asks for access to Desktop, Documents and Downloads the first time you open Media.
 
 **Assistant (Dia-inspired)**
@@ -114,7 +114,7 @@ Press **Test** to check the connection. Keys are saved in your login Keychain un
 | New tab (command bar) | ⌘T |
 | Edit address | ⌘L |
 | Command palette | ⌘K |
-| Close / reopen tab | ⌘W / ⌘⇧T |
+| Close / reopen tab (pinned and folder tabs unload) | ⌘W / ⌘⇧T |
 | Next / previous tab | ⌃Tab / ⌃⇧Tab, ⌘⇧] / ⌘⇧[ |
 | Go to tab 1–8 / last tab | ⌘1–⌘8 / ⌘9 |
 | Back / forward | ⌘[ / ⌘] |
@@ -124,7 +124,7 @@ Press **Test** to check the connection. Keys are saved in your login Keychain un
 | Bookmark page | ⌘⇧D |
 | Copy URL | ⌘⇧C |
 | Duplicate tab | ⌘⇧K |
-| New folder from tab | ⌥⌘G |
+| New folder / new folder from tab | ⌥⌘N / ⌥⌘G |
 | New space | ⌘⇧N |
 | Switch space | ⌃1–⌃9, ⌃⌘← / ⌃⌘→ |
 | Toggle sidebar | ⌘S |

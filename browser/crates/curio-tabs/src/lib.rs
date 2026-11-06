@@ -285,12 +285,50 @@ impl TabStrip {
             .is_some_and(|loc| loc.section == Section::Pinned)
     }
 
+    /// Where a new tab opened from `anchor` goes: right after it when it's
+    /// a regular tab, right after its folder when it's in a regular folder,
+    /// and at the top of the unpinned section otherwise. New tabs never land
+    /// inside a folder or in the pinned section.
+    #[must_use]
+    pub fn placement_for_new_tab(&self, anchor: Option<TabId>) -> Placement {
+        let location = anchor.and_then(|id| self.location_of(id).map(|loc| (id, loc)));
+        match location {
+            Some((id, loc)) if loc.section == Section::Unpinned => match loc.group {
+                Some(group) => Placement::AfterGroup(group),
+                None => Placement::AfterTab(id),
+            },
+            _ => Placement::SectionStart(Section::Unpinned),
+        }
+    }
+
+    /// Whether a tab is kept when closed: pinned tabs and tabs in a folder.
+    /// Closing a saved tab unloads it and resets it to its home URL.
+    #[must_use]
+    pub fn is_saved(&self, id: TabId) -> bool {
+        self.location_of(id)
+            .is_some_and(|loc| loc.section == Section::Pinned || loc.group.is_some())
+    }
+
+    /// Saved tabs remember the URL they were saved with as their home; a
+    /// tab that leaves the pinned section and every folder forgets it.
+    fn sync_home(&mut self, id: TabId) {
+        let saved = self.is_saved(id);
+        if let Some(tab) = self.tabs.get_mut(&id) {
+            if !saved {
+                tab.home_url = None;
+            } else if tab.home_url.is_none() {
+                tab.home_url = Some(tab.url.clone());
+            }
+        }
+    }
+
     /// Inserts a tab. If the placement refers to something that no longer
     /// exists, the tab is appended to the unpinned section instead.
     pub fn insert(&mut self, tab: Tab, placement: Placement) -> TabId {
         let id = tab.id;
         self.tabs.insert(id, tab);
         self.attach(id, placement);
+        self.sync_home(id);
         id
     }
 
@@ -402,6 +440,7 @@ impl TabStrip {
             return false;
         }
         self.attach(id, placement);
+        self.sync_home(id);
         true
     }
 
@@ -851,5 +890,72 @@ mod tests {
         let json = serde_json::to_string(&strip).expect("serialize");
         let back: TabStrip = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(back, strip);
+    }
+
+    #[test]
+    fn tabs_in_folders_are_saved_with_a_home_url() {
+        let (mut strip, ids) = strip_with(3);
+        let folder = strip.create_group("Reading", AccentColor::Ocean, &[ids[0]]);
+        assert!(strip.is_saved(ids[0]));
+        assert!(!strip.is_saved(ids[1]));
+        assert_eq!(
+            strip.tab(ids[0]).and_then(|t| t.home_url.as_deref()),
+            Some("https://site0.test")
+        );
+
+        // Dragging a tab into the folder saves it too.
+        assert!(strip.move_tab(ids[1], Placement::InGroup(folder, None)));
+        assert!(strip.is_saved(ids[1]));
+        assert!(strip.tab(ids[1]).is_some_and(|t| t.home_url.is_some()));
+
+        // Taking it out of the folder forgets its home.
+        assert!(strip.move_tab(ids[1], Placement::SectionEnd(Section::Unpinned)));
+        assert!(!strip.is_saved(ids[1]));
+        assert!(strip.tab(ids[1]).is_some_and(|t| t.home_url.is_none()));
+    }
+
+    #[test]
+    fn an_empty_folder_stays_until_deleted() {
+        let (mut strip, ids) = strip_with(1);
+        let folder = strip.create_group("Empty", AccentColor::Ocean, &[]);
+        assert!(strip.group(folder).is_some_and(|g| g.tabs.is_empty()));
+
+        strip.move_tab(ids[0], Placement::InGroup(folder, None));
+        strip.remove(ids[0]);
+        assert!(
+            strip.group(folder).is_some(),
+            "closing a folder's last tab keeps the folder"
+        );
+    }
+
+    #[test]
+    fn new_tabs_open_outside_folders() {
+        let (mut strip, ids) = strip_with(3);
+        let folder = strip.create_group("Reading", AccentColor::Ocean, &[ids[0]]);
+        strip.pin(ids[2]);
+
+        // From a regular tab: right after it.
+        assert_eq!(
+            strip.placement_for_new_tab(Some(ids[1])),
+            Placement::AfterTab(ids[1])
+        );
+        // From a tab in a folder: right after the folder, not inside it.
+        assert_eq!(
+            strip.placement_for_new_tab(Some(ids[0])),
+            Placement::AfterGroup(folder)
+        );
+        let new = strip.insert(
+            Tab::new("https://new.test"),
+            strip.placement_for_new_tab(Some(ids[0])),
+        );
+        assert!(!strip.is_saved(new));
+        assert_eq!(strip.location_of(new).and_then(|l| l.group), None);
+        // From a pinned tab or nothing: top of the regular tabs.
+        for anchor in [Some(ids[2]), None] {
+            assert_eq!(
+                strip.placement_for_new_tab(anchor),
+                Placement::SectionStart(Section::Unpinned)
+            );
+        }
     }
 }

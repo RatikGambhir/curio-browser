@@ -36,35 +36,46 @@ pub(crate) const RAIL_WIDTH: Pixels = px(84.);
 /// How long the sidebar ⇄ library morph takes.
 const TRANSITION: Duration = Duration::from_millis(280);
 
-/// Height of one row of Media tiles: the preview, two lines of text, and the
-/// gap below. `uniform_list` needs every row the same height.
-const MEDIA_PREVIEW_HEIGHT: Pixels = px(96.);
+/// Height of a Media tile's preview. The preview is fixed so every row is the
+/// same height, which `uniform_list` needs.
+const MEDIA_PREVIEW_HEIGHT: Pixels = px(140.);
 
 /// A collection in the library.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LibrarySection {
     Media,
     Downloads,
+    // Hidden from the rail for now (see `ALL`).
+    #[allow(dead_code)]
     Notes,
     Spaces,
+    // Hidden from the rail for now (see `ALL`).
+    #[allow(dead_code)]
     Calendar,
     ArchivedTabs,
     ClipboardHistory,
+    // Hidden from the rail for now (see `ALL`).
+    #[allow(dead_code)]
     Aliases,
+    // Hidden from the rail for now (see `ALL`).
+    #[allow(dead_code)]
     Inbox,
 }
 
 impl LibrarySection {
-    const ALL: [Self; 9] = [
+    // Notes, Calendar, Aliases and Inbox are hidden from the rail until
+    // they're built. Uncomment them (and bump the length back to 9) to show
+    // them again.
+    const ALL: [Self; 5] = [
         Self::Media,
         Self::Downloads,
-        Self::Notes,
+        // Self::Notes,
         Self::Spaces,
-        Self::Calendar,
+        // Self::Calendar,
         Self::ArchivedTabs,
         Self::ClipboardHistory,
-        Self::Aliases,
-        Self::Inbox,
+        // Self::Aliases,
+        // Self::Inbox,
     ];
 
     fn label(self) -> &'static str {
@@ -628,7 +639,7 @@ impl BrowserWindow {
         (!rows.is_empty()).then(|| v_flex().gap(px(2.)).children(rows).into_any_element())
     }
 
-    /// Media as a grid of two tiles per row. Only the rows in view are
+    /// Media as a list of one tile per row. Only the rows in view are
     /// rendered, so thousands of files cost no more than a screenful.
     fn render_library_media(&self, query: &str, theme: &CurioTheme) -> AnyElement {
         let media = self.library.media.clone();
@@ -651,23 +662,16 @@ impl BrowserWindow {
 
         let theme = *theme;
         let thumbnails = self.library.thumbnails.clone();
-        let rows = matching.len().div_ceil(2);
-        uniform_list("library-media", rows, move |range, _, cx| {
+        uniform_list("library-media", matching.len(), move |range, _, cx| {
             range
-                .map(|row| {
-                    let mut tiles = (row * 2..(row * 2 + 2).min(matching.len()))
-                        .map(|i| media_tile(i, &media[matching[i]], &thumbnails, &theme, cx));
-                    let first = tiles.next();
-                    // An odd last tile keeps its column width.
-                    let second = tiles
-                        .next()
-                        .unwrap_or_else(|| div().flex_1().into_any_element());
-                    h_flex()
-                        .pb(px(10.))
-                        .gap(px(8.))
-                        .items_start()
-                        .children(first)
-                        .child(second)
+                .map(|i| {
+                    h_flex().pb(px(10.)).child(media_tile(
+                        i,
+                        &media[matching[i]],
+                        &thumbnails,
+                        &theme,
+                        cx,
+                    ))
                 })
                 .collect()
         })
@@ -754,22 +758,31 @@ impl BrowserWindow {
             .workspace
             .closed_tabs()
             .filter_map(|closed| {
-                let space = self.workspace.space(closed.space)?;
+                // A tab whose space was deleted reopens in the active space.
+                let space = self.workspace.space(closed.space);
+                let space_name = space.map_or("", |s| s.name.as_str());
                 let title = closed.tab.display_title();
-                matches(query, &[&title, &closed.tab.url, &space.name])
+                matches(query, &[&title, &closed.tab.url, space_name])
                     .then_some((closed, space, title))
             })
             .map(|(closed, space, title)| {
                 let id = closed.tab.id;
                 let host = display_host(&closed.tab.url);
+                let target = space.unwrap_or_else(|| self.workspace.active_space());
                 ListItem::new(SharedString::from(format!("archived-{id}")))
                     .leading(Favicon::new(title.clone()).url(closed.tab.favicon_url.as_deref()))
                     .title(title)
-                    .subtitle(format!("{host} · {}", space.name))
-                    .tooltip_text(format!("Reopen in {}", space.name))
-                    .child(
-                        ColorDot::new(CurioTheme::gradient_swatch(space.gradient)).diameter(px(8.)),
-                    )
+                    .subtitle(match space {
+                        Some(space) => format!("{host} · {}", space.name),
+                        None => host,
+                    })
+                    .tooltip_text(format!("Reopen in {}", target.name))
+                    .when_some(space, |item, space| {
+                        item.child(
+                            ColorDot::new(CurioTheme::gradient_swatch(space.gradient))
+                                .diameter(px(8.)),
+                        )
+                    })
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.reopen_archived_tab(id, window, cx);
                     }))

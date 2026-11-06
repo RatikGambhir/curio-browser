@@ -33,7 +33,7 @@ use gpui_kit::{
 };
 
 use crate::components::prelude::*;
-use crate::theme::CurioTheme;
+use crate::theme::{CurioTheme, metrics};
 use crate::{Services, settings};
 
 /// A tab that can be shared with the assistant.
@@ -560,22 +560,28 @@ impl AiPanel {
 
     // ----- Rendering ------------------------------------------------------
 
+    /// Lines up with the page toolbar and reads like the sidebar's space
+    /// header: a tinted mark, the title, and muted icon buttons.
     fn render_header(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = *CurioTheme::get(cx);
         let history = self.history.clone();
         let entity = cx.entity().downgrade();
         let title = if self.messages.is_empty() {
-            SharedString::from("Curio Assistant")
+            SharedString::from("Assistant")
         } else {
             SharedString::from(self.conversation.title.clone())
         };
         h_flex()
-            .h(px(46.))
-            .px(px(12.))
+            .flex_shrink_0()
+            .h(metrics::TOOLBAR_HEIGHT)
+            .pl(px(14.))
+            .pr(px(6.))
             .gap(px(8.))
-            .border_b_1()
-            .border_color(theme.divider)
-            .child(logo_mark(px(20.)))
+            .child(
+                div()
+                    .text_color(theme.accent_text)
+                    .child(Icon::new(IconName::Sparkles).small()),
+            )
             .child(
                 div()
                     .flex_1()
@@ -587,10 +593,7 @@ impl AiPanel {
                     .child(title),
             )
             .child(
-                Button::new("ai-history")
-                    .ghost()
-                    .small()
-                    .icon(IconName::CalendarClock)
+                IconButton::new("ai-history", IconName::CalendarClock)
                     .tooltip("Chat history")
                     .dropdown_menu(move |mut menu, _, _| {
                         if history.is_empty() {
@@ -625,23 +628,20 @@ impl AiPanel {
                     }),
             )
             .child(
-                Button::new("ai-new")
-                    .ghost()
-                    .small()
-                    .icon(IconName::SquarePen)
+                IconButton::new("ai-new", IconName::SquarePen)
                     .tooltip("New chat")
                     .on_click(cx.listener(|this, _, _, cx| this.new_conversation(cx))),
             )
             .child(
-                Button::new("ai-close")
-                    .ghost()
-                    .small()
-                    .icon(IconName::PanelRightClose)
+                IconButton::new("ai-close", IconName::PanelRightClose)
                     .tooltip("Close assistant")
                     .on_click(cx.listener(|_, _, _, cx| cx.emit(AiPanelEvent::Close))),
             )
     }
 
+    /// The empty chat: a short prompt and sidebar-style rows, anchored just
+    /// above the composer where the next action happens. Without a provider
+    /// the only row is the one that sets it up.
     fn render_empty(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = *CurioTheme::get(cx);
         let has_page = self.current_tab.is_some();
@@ -653,67 +653,64 @@ impl AiPanel {
                           label: &'static str,
                           action: QuickAction,
                           cx: &mut Context<Self>| {
-            Chip::new(id, label).icon(icon).outlined().large().on_click(
-                cx.listener(move |this, _, window, cx| this.quick_action(&action, window, cx)),
-            )
+            ListItem::new(id)
+                .muted(true)
+                .leading(Icon::new(icon).size(Favicon::DEFAULT_SIZE))
+                .title(label)
+                .on_click(
+                    cx.listener(move |this, _, window, cx| this.quick_action(&action, window, cx)),
+                )
         };
         v_flex()
             .flex_1()
-            .items_center()
-            .justify_center()
-            .gap(px(14.))
-            .px(px(24.))
-            .child(logo_mark(px(52.)))
+            .justify_end()
+            .px(px(10.))
+            .pb(px(4.))
+            .gap(px(2.))
             .child(
-                div()
-                    .text_lg()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(theme.text)
-                    .child("What are you curious about?"),
-            )
-            .child(
-                div()
-                    .text_sm()
-                    .text_center()
-                    .text_color(theme.text_muted)
-                    .child("Ask about this page, compare your open tabs, or explore anything. Pages are shared only when shown below the message box."),
+                v_flex()
+                    .px(px(8.))
+                    .pb(px(10.))
+                    .gap(px(4.))
+                    .child(
+                        div()
+                            .text_base()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(theme.text)
+                            .child("What are you curious about?"),
+                    )
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(theme.text_muted)
+                            .child("Ask about this page, your tabs, or anything else. Only the pages attached below are shared."),
+                    ),
             )
             .when(!config_ready, |el| {
                 el.child(
-                    v_flex()
-                        .gap(px(8.))
-                        .items_center()
-                        .p(px(12.))
-                        .rounded(px(10.))
-                        .bg(theme.accent_soft)
+                    ListItem::new("ai-setup")
+                        .leading(
+                            div()
+                                .text_color(theme.accent_text)
+                                .child(Icon::new(IconName::Settings2).size(Favicon::DEFAULT_SIZE)),
+                        )
+                        .title("Connect an AI provider")
+                        .subtitle("Add a provider and key in Settings")
                         .child(
                             div()
-                                .text_sm()
-                                .text_color(theme.text)
-                                .child("Connect an AI provider to start chatting."),
+                                .text_color(theme.text_faint)
+                                .child(Icon::new(IconName::ChevronRight).xsmall()),
                         )
-                        .child(
-                            Button::new("ai-setup")
-                                .primary()
-                                .small()
-                                .label("Set Up AI…")
-                                .on_click(cx.listener(|_, _, _, cx| cx.emit(AiPanelEvent::OpenSettings))),
-                        ),
+                        .on_click(cx.listener(|_, _, _, cx| cx.emit(AiPanelEvent::OpenSettings))),
                 )
             })
-            .child(
-                v_flex()
-                    .gap(px(8.))
-                    .w_full()
-                    .max_w(px(320.))
-                    .when(has_page, |el| {
-                        el.child(suggestion("qa-sum", IconName::FileText, "Summarize this page", QuickAction::SummarizePage, cx))
-                            .child(suggestion("qa-key", IconName::List, "What are the key points?", QuickAction::KeyPoints, cx))
-                    })
-                    .when(has_tabs, |el| {
-                        el.child(suggestion("qa-cmp", IconName::Columns2, "Compare my open tabs", QuickAction::CompareTabs, cx))
-                    }),
-            )
+            .when(config_ready && has_page, |el| {
+                el.child(suggestion("qa-sum", IconName::FileText, "Summarize this page", QuickAction::SummarizePage, cx))
+                    .child(suggestion("qa-key", IconName::List, "What are the key points?", QuickAction::KeyPoints, cx))
+            })
+            .when(config_ready && has_tabs, |el| {
+                el.child(suggestion("qa-cmp", IconName::Columns2, "Compare my open tabs", QuickAction::CompareTabs, cx))
+            })
             .into_any_element()
     }
 
@@ -735,10 +732,9 @@ impl AiPanel {
                         .max_w(gpui_kit::relative(0.88))
                         .px(px(12.))
                         .py(px(8.))
-                        .rounded(px(14.))
+                        .rounded(px(12.))
                         .rounded_br(px(4.))
-                        .bg(theme.user_bubble)
-                        .text_color(theme.user_bubble_text)
+                        .raised_row(&theme)
                         .text_sm()
                         .when_some(view.text.clone(), |el, text| {
                             el.child(TextView::new(&text).selectable(true))
@@ -887,21 +883,15 @@ impl AiPanel {
                 .h(px(24.))
                 .rounded(px(7.))
                 .border_1()
-                .border_color(if active {
-                    theme.accent_soft
-                } else {
-                    theme.surface_border
-                })
-                .bg(if active {
-                    theme.accent_soft
-                } else {
-                    theme.surface_raised
-                })
                 .text_xs()
-                .text_color(if active {
-                    theme.accent_text
-                } else {
-                    theme.text_muted
+                .map(|el| {
+                    if active {
+                        el.bg(theme.row_active)
+                            .border_color(theme.row_active_border)
+                            .text_color(theme.row_active_text)
+                    } else {
+                        el.border_color(theme.divider).text_color(theme.text_faint)
+                    }
                 })
                 .child(icon)
                 .child(div().max_w(px(150.)).truncate().child(label))
@@ -1058,20 +1048,34 @@ impl AiPanel {
         )
     }
 
-    fn render_composer(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    /// The message box wears the address field's look (a translucent field
+    /// on the chrome), brighter with an accent edge while focused.
+    fn render_composer(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = *CurioTheme::get(cx);
         let busy = self.is_busy();
         let ai = settings(cx).ai.clone();
         let model = ai.model(ai.provider);
-        let empty = self.composer.read(cx).value().trim().is_empty();
+        let composer = self.composer.read(cx);
+        let empty = composer.value().trim().is_empty();
+        let focused = composer.focus_handle(cx).is_focused(window);
         v_flex()
-            .m(px(10.))
+            .flex_shrink_0()
+            .mx(px(10.))
+            .mb(px(10.))
             .mt(px(4.))
             .p(px(8.))
             .gap(px(6.))
-            .rounded(px(14.))
-            .surface(&theme)
-            .shadow_sm()
+            .rounded(metrics::CARD_RADIUS)
+            .border_1()
+            .map(|el| {
+                if focused {
+                    el.bg(theme.field_hover).border_color(theme.accent_soft)
+                } else {
+                    el.bg(theme.field)
+                        .border_color(gpui_kit::transparent_black())
+                        .hover(|s| s.bg(theme.field_hover))
+                }
+            })
             .child(self.render_context_bar(cx))
             .child(div().child(Textarea::new(&self.composer).appearance(false)))
             .child(
@@ -1108,8 +1112,7 @@ impl AiPanel {
 }
 
 impl Render for AiPanel {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = *CurioTheme::get(cx);
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let body: AnyElement = if self.messages.is_empty() {
             self.render_empty(cx)
         } else {
@@ -1124,16 +1127,15 @@ impl Render for AiPanel {
                 .flex_1()
                 .overflow_y_scroll()
                 .track_scroll(&self.scroll)
-                .child(v_flex().gap(px(16.)).p(px(14.)).children(rows))
+                .child(v_flex().gap(px(16.)).px(px(14.)).py(px(8.)).children(rows))
                 .into_any_element()
         };
         v_flex()
             .id("ai-panel")
             .track_focus(&self.focus_handle)
             .size_full()
-            .bg(theme.surface)
             .child(self.render_header(cx))
             .child(body)
-            .child(self.render_composer(cx))
+            .child(self.render_composer(window, cx))
     }
 }

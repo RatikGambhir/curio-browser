@@ -26,7 +26,7 @@ pub trait CurioStyled: Styled + Sized {
             .border_color(theme.surface_border)
     }
 
-    /// The rounded card the page and the assistant float on.
+    /// The rounded card the page floats on.
     #[must_use]
     fn card(self, theme: &CurioTheme) -> Self {
         self.rounded(metrics::CARD_RADIUS)

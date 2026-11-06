@@ -112,6 +112,18 @@ impl Database {
         Ok(Self { conn })
     }
 
+    /// Copies everything in the write-ahead log into the main database file
+    /// and empties the log. Called on quit so `curio.db` alone holds all the
+    /// data.
+    ///
+    /// # Errors
+    /// Fails on SQLite errors.
+    pub fn checkpoint(&self) -> Result<()> {
+        self.conn
+            .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))?;
+        Ok(())
+    }
+
     // ----- Key/value ----------------------------------------------------
 
     /// Reads a small value from the key/value table.
@@ -291,9 +303,14 @@ impl Database {
         Ok(())
     }
 
-    /// Closed tabs saved with the session, newest first. Rows that can't be
-    /// read (for example from a newer build) are skipped.
-    fn load_closed_tabs(&self) -> Result<Vec<ClosedTab>> {
+    /// The saved Archived Tabs, newest first. Rows that can't be read (for
+    /// example from a newer build) are skipped. Loaded with the session, and
+    /// on their own when the session isn't restored, so the archive is never
+    /// lost.
+    ///
+    /// # Errors
+    /// Fails on SQLite errors.
+    pub fn load_closed_tabs(&self) -> Result<Vec<ClosedTab>> {
         let mut stmt = self
             .conn
             .prepare("SELECT data FROM closed_tabs ORDER BY position")?;
@@ -1178,6 +1195,71 @@ mod tests {
         let downloads = db.downloads(10).expect("list");
         assert_eq!(downloads[0].state, "completed");
         assert_eq!(downloads[0].path.as_deref(), Some("/tmp/f.zip"));
+    }
+
+    #[test]
+    fn folders_survive_a_restart() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("curio.db");
+        let mut ws = sample_workspace();
+        let space = ws.spaces()[0].id;
+        let tab = ws.spaces()[0].strip.ordered_tab_ids()[0];
+        let (full, empty) = {
+            let strip = &mut ws.space_mut(space).expect("space").strip;
+            let full = strip.create_group("Reading", AccentColor::Ocean, &[tab]);
+            strip.rename_group(full, "Read Later");
+            strip.set_group_collapsed(full, true);
+            let empty = strip.create_group("Empty", AccentColor::Rose, &[]);
+            (full, empty)
+        };
+        {
+            let mut db = Database::open(&path).expect("open");
+            db.save_workspace(&ws).expect("save");
+        }
+
+        let db = Database::open(&path).expect("reopen");
+        let loaded = db.load_workspace().expect("load").expect("saved");
+        let strip = &loaded.space(space).expect("space").strip;
+        let full = strip.group(full).expect("folder kept");
+        assert_eq!(full.name, "Read Later");
+        assert!(full.collapsed);
+        assert_eq!(full.tabs, vec![tab]);
+        assert!(strip.is_saved(tab));
+        assert!(strip.tab(tab).is_some_and(|t| t.home_url.is_some()));
+        let empty = strip.group(empty).expect("empty folder kept");
+        assert_eq!(empty.color, AccentColor::Rose);
+        assert!(empty.tabs.is_empty());
+        assert_eq!(loaded.space(space), ws.space(space));
+    }
+
+    #[test]
+    fn archived_tabs_persist_in_the_database_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("curio.db");
+        let mut ws = sample_workspace();
+        let closed = ws.spaces()[0].strip.ordered_tab_ids()[0];
+        ws.close_tab(closed).expect("tab exists");
+        {
+            let mut db = Database::open(&path).expect("open");
+            db.save_workspace(&ws).expect("save");
+            db.checkpoint().expect("checkpoint");
+        }
+        let wal = dir.path().join("curio.db-wal");
+        assert!(
+            std::fs::metadata(&wal).map_or(true, |m| m.len() == 0),
+            "checkpoint empties the write-ahead log"
+        );
+
+        let db = Database::open(&path).expect("reopen");
+        let archive: Vec<TabId> = db
+            .load_closed_tabs()
+            .expect("load")
+            .iter()
+            .map(|c| c.tab.id)
+            .collect();
+        assert_eq!(archive, vec![closed]);
+        let loaded = db.load_workspace().expect("load").expect("saved");
+        assert_eq!(loaded.closed_tab_count(), 1);
     }
 
     #[test]

@@ -18,7 +18,7 @@ mod view_model;
 
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use curio_browser::{BrowserTab, EngineConfig, FindResult};
 use curio_core::TabId;
@@ -33,7 +33,7 @@ use gpui_kit::{
     Task, Window, deferred, div, px,
 };
 
-use crate::components::{CurioStyled as _, GradientBackdrop};
+use crate::components::GradientBackdrop;
 
 use crate::ai_panel::{AiPanel, AiPanelEvent};
 use crate::command_bar::{CommandBar, CommandBarEvent, CommandMode};
@@ -42,6 +42,7 @@ use crate::{Services, actions, settings};
 
 pub(crate) use drag::{DraggedGroup, DraggedTab};
 use library::Library;
+use sidebar::FolderRename;
 
 /// Which divider is being dragged.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -86,6 +87,8 @@ pub struct BrowserWindow {
     resizing: Option<Resize>,
     /// The sidebar is temporarily shown over the page while hidden.
     pub(crate) sidebar_peek: bool,
+    /// The folder whose name is being edited in the sidebar, if any.
+    pub(crate) folder_rename: Option<FolderRename>,
     /// Bumped on every space switch to restart the transition animation.
     pub(crate) space_transition: usize,
     pub(crate) space_direction: f32,
@@ -94,6 +97,14 @@ pub struct BrowserWindow {
     /// follows the active space's gradient instead.
     web_appearance: Appearance,
     swipe_accumulator: f32,
+    /// The traffic lights' current top offset, so they're only moved when
+    /// it changes.
+    traffic_lights_y: Pixels,
+    /// The sidebar sliding open or closed, if it is.
+    sidebar_transition: Option<SidebarTransition>,
+    /// How far the left column is shown this frame, from 0.0 (hidden) to
+    /// 1.0. The page bar and the traffic lights follow it.
+    left_reveal: f32,
     save_pending: bool,
     pub(crate) downloads: Vec<DownloadItem>,
     pub(crate) top_sites: Vec<HistoryEntry>,
@@ -195,11 +206,15 @@ impl BrowserWindow {
             ai_width: px(settings.appearance.ai_panel_width),
             resizing: None,
             sidebar_peek: false,
+            folder_rename: None,
             space_transition: 0,
             space_direction: 0.0,
             previous_theme,
             web_appearance,
             swipe_accumulator: 0.0,
+            traffic_lights_y: metrics::TRAFFIC_LIGHTS_Y,
+            sidebar_transition: None,
+            left_reveal: 1.0,
             save_pending: false,
             downloads: Vec::new(),
             top_sites: Vec::new(),
@@ -236,7 +251,63 @@ impl BrowserWindow {
 
     /// Whether a column (the sidebar or the library) sits left of the page.
     pub(crate) fn left_column_visible(&self, cx: &gpui_kit::App) -> bool {
-        self.library.open || self.library_animating() || self.sidebar_visible(cx)
+        self.library.open
+            || self.library_animating()
+            || self.sidebar_animating()
+            || self.sidebar_visible(cx)
+    }
+
+    /// Shows or hides the sidebar, sliding it from wherever it is now.
+    pub(crate) fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
+        if self.layout(cx) == TabLayout::Horizontal {
+            return;
+        }
+        let showing = self.sidebar_visible(cx);
+        let now = Instant::now();
+        let from = self
+            .sidebar_transition
+            .and_then(|t| t.progress_at(now))
+            .unwrap_or(if showing { 1.0 } else { 0.0 });
+        let to = if showing { 0.0 } else { 1.0 };
+        // The Library swaps out instantly, so there's nothing to slide from.
+        let animate = !settings(cx).appearance.reduce_motion && !self.library.open;
+        self.sidebar_transition = animate.then(|| SidebarTransition::new(now, from, to));
+        self.sidebar_peek = false;
+        self.library.close_immediately();
+        crate::update_settings(cx, |s| {
+            s.appearance.sidebar_visible = !s.appearance.sidebar_visible;
+        });
+        cx.notify();
+    }
+
+    /// How far the sidebar is shown, from 0.0 (hidden) to 1.0. While it's
+    /// sliding this asks for the next frame.
+    fn sidebar_reveal(&mut self, window: &mut Window, cx: &gpui_kit::App) -> f32 {
+        if let Some(progress) = self
+            .sidebar_transition
+            .and_then(|t| t.progress_at(Instant::now()))
+        {
+            window.request_animation_frame();
+            return progress;
+        }
+        self.sidebar_transition = None;
+        if self.sidebar_visible(cx) { 1.0 } else { 0.0 }
+    }
+
+    fn sidebar_animating(&self) -> bool {
+        self.sidebar_transition.is_some()
+    }
+
+    /// Keeps the traffic lights centered on the row they share. With the
+    /// sidebar hidden they sit in the page card's top bar, which starts
+    /// `PANEL_GAP` below the window edge, so they move down by that much,
+    /// in step with the sidebar sliding away.
+    fn align_traffic_lights(&mut self, in_page_bar: f32, window: &mut Window) {
+        let y = metrics::TRAFFIC_LIGHTS_Y + metrics::PANEL_GAP * in_page_bar;
+        if (y - self.traffic_lights_y).abs() >= px(0.25) {
+            self.traffic_lights_y = y;
+            window.set_traffic_light_position(gpui_kit::point(metrics::TRAFFIC_LIGHTS_X, y));
+        }
     }
 
     /// Re-applies the active space's gradient to the chrome, and the
@@ -292,12 +363,16 @@ impl BrowserWindow {
         .detach();
     }
 
-    /// Saves the workspace synchronously (on quit).
+    /// Saves the workspace synchronously (on quit), then folds the
+    /// write-ahead log into `curio.db`.
     pub(crate) fn save_now(&mut self, cx: &mut gpui_kit::App) {
         self.save_pending = false;
         let storage = Services::get(cx).storage.clone();
         if let Err(error) = storage.with(|db| db.save_workspace(&self.workspace)) {
             tracing::error!(%error, "could not save session on exit");
+        }
+        if let Err(error) = storage.with(|db| db.checkpoint()) {
+            tracing::warn!(%error, "could not checkpoint the database on exit");
         }
     }
 
@@ -568,6 +643,85 @@ impl BrowserWindow {
     }
 }
 
+/// How long the sidebar takes to slide open; closing is quicker.
+const SIDEBAR_OPEN: Duration = Duration::from_millis(240);
+const SIDEBAR_CLOSE: Duration = Duration::from_millis(180);
+
+/// The sidebar sliding between hidden (0.0) and shown (1.0).
+#[derive(Debug, Clone, Copy)]
+struct SidebarTransition {
+    started: Instant,
+    from: f32,
+    to: f32,
+    duration: Duration,
+}
+
+impl SidebarTransition {
+    /// A slide from `from` to `to`. Reversing part-way takes only the time
+    /// for the distance left, so it never slows down.
+    fn new(started: Instant, from: f32, to: f32) -> Self {
+        let full = if to > from {
+            SIDEBAR_OPEN
+        } else {
+            SIDEBAR_CLOSE
+        };
+        Self {
+            started,
+            from,
+            to,
+            duration: full.mul_f32((to - from).abs().max(0.25)),
+        }
+    }
+
+    /// Where the slide is at `now`, or `None` once it has finished.
+    fn progress_at(&self, now: Instant) -> Option<f32> {
+        let t =
+            now.saturating_duration_since(self.started).as_secs_f32() / self.duration.as_secs_f32();
+        if t >= 1.0 {
+            return None;
+        }
+        // Cubic ease-out, as for the Library: quick to respond, gentle to
+        // settle. The page resizes with the column, so nothing jumps.
+        let eased = 1.0 - (1.0 - t).powi(3);
+        Some(self.from + (self.to - self.from) * eased)
+    }
+}
+
+impl BrowserWindow {
+    /// The sidebar part-way open. The column's width follows `reveal`
+    /// every frame so the page beside it resizes smoothly; the sidebar keeps
+    /// its settled width (so its rows never reflow), drifts a little and
+    /// fades as the column clips it.
+    fn render_sidebar_slide(
+        &mut self,
+        reveal: f32,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        // Open, the sidebar is followed by its 6px resize handle; hidden,
+        // the page's own left inset is all that's left.
+        let open_width = self.sidebar_width + px(6.);
+        let width = metrics::PANEL_GAP + (open_width - metrics::PANEL_GAP) * reveal;
+        div()
+            .relative()
+            .w(width)
+            .h_full()
+            .flex_shrink_0()
+            .overflow_hidden()
+            .child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .left(px(-16.) * (1. - reveal))
+                    .w(self.sidebar_width)
+                    .h_full()
+                    .opacity(reveal)
+                    .child(self.render_sidebar(false, window, cx)),
+            )
+            .into_any_element()
+    }
+}
+
 impl Render for BrowserWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = *CurioTheme::get(cx);
@@ -576,8 +730,24 @@ impl Render for BrowserWindow {
         let sidebar_visible = self.sidebar_visible(cx);
         // Read before `left_column_visible`, since a finished morph clears here.
         let library_progress = self.library_progress(window);
+        let sidebar_reveal = self.sidebar_reveal(window, cx);
         let left_column = self.left_column_visible(cx);
         let reduce_motion = settings(cx).appearance.reduce_motion;
+        // The Library fills the left column as it opens, standing in for a
+        // hidden sidebar.
+        self.left_reveal = if self.library_animating() && !sidebar_visible {
+            library_progress
+        } else if self.library.open || self.library_animating() {
+            1.0
+        } else {
+            sidebar_reveal
+        };
+        let in_page_bar = if layout == TabLayout::Vertical {
+            1.0 - self.left_reveal
+        } else {
+            0.0
+        };
+        self.align_traffic_lights(in_page_bar, window);
 
         let mut main = gpui_kit::component::v_flex().flex_1().min_w_0().h_full();
         // With vertical tabs the navigation and address bar are the top row
@@ -598,6 +768,8 @@ impl Render for BrowserWindow {
                 window,
                 cx,
             ));
+        } else if self.sidebar_animating() {
+            row = row.child(self.render_sidebar_slide(sidebar_reveal, window, cx));
         } else if self.library.open {
             row = row
                 .child(self.render_library(window, cx))
@@ -639,7 +811,9 @@ impl Render for BrowserWindow {
                     .flex_shrink_0()
                     .py(metrics::PANEL_GAP)
                     .pr(metrics::PANEL_GAP)
-                    .child(div().size_full().card(&theme).child(self.ai_panel.clone())),
+                    // On the chrome like the sidebar: the page stays the
+                    // only card.
+                    .child(self.ai_panel.clone()),
             );
         }
 
@@ -742,5 +916,35 @@ impl Render for BrowserWindow {
         }
 
         root
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sidebar_slide_eases_to_its_target_then_finishes() {
+        let start = Instant::now();
+        let close = SidebarTransition::new(start, 1.0, 0.0);
+        assert_eq!(close.duration, SIDEBAR_CLOSE);
+        assert_eq!(close.progress_at(start), Some(1.0));
+        // Ease-out: well past halfway at the halfway point.
+        let half = close
+            .progress_at(start + SIDEBAR_CLOSE / 2)
+            .expect("still sliding");
+        assert!(half < 0.2, "closing is mostly done by half time: {half}");
+        assert_eq!(close.progress_at(start + SIDEBAR_CLOSE), None);
+
+        let open = SidebarTransition::new(start, 0.0, 1.0);
+        assert_eq!(open.duration, SIDEBAR_OPEN);
+    }
+
+    #[test]
+    fn reversing_part_way_takes_only_the_remaining_time() {
+        let start = Instant::now();
+        let reverse = SidebarTransition::new(start, 0.5, 1.0);
+        assert_eq!(reverse.duration, SIDEBAR_OPEN / 2);
+        assert_eq!(reverse.progress_at(start), Some(0.5));
     }
 }

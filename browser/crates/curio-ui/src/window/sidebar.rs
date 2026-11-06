@@ -4,23 +4,50 @@
 use std::time::Duration;
 
 use curio_core::{GroupId, SpaceId, TabId};
+use curio_settings::TabLayout;
 use curio_spaces::TabOwner;
 use curio_tabs::{GroupPlacement, Item, Placement, Row, Section};
 use gpui_kit::AppContext as _;
 use gpui_kit::assets::IconName;
+use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenu};
 use gpui_kit::component::{Icon, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    Animation, AnimationExt as _, AnyElement, ClickEvent, Context, FontWeight,
-    InteractiveElement as _, IntoElement, ParentElement as _, SharedString,
-    StatefulInteractiveElement as _, Styled as _, WeakEntity, Window, div, px, relative,
+    Animation, AnimationExt as _, AnyElement, ClickEvent, Context, Entity, FontWeight, Hsla,
+    InteractiveElement as _, IntoElement, MouseButton, ParentElement as _, Pixels, SharedString,
+    StatefulInteractiveElement as _, Styled as _, Subscription, WeakEntity, Window, div, px,
 };
 
 use super::{BrowserWindow, DraggedGroup, DraggedTab};
 use crate::components::prelude::*;
 use crate::theme::{CurioTheme, metrics};
 use crate::{actions, settings};
+
+/// Height of a favorite tile.
+const FAVORITE_TILE_HEIGHT: Pixels = px(40.);
+/// Space between favorite tiles, across and down.
+const FAVORITE_GAP: Pixels = px(6.);
+
+/// How many favorite tiles fit in a row of a sidebar this wide: four, or
+/// three when four would make tiles narrower than 48px.
+fn favorite_columns(sidebar_width: Pixels) -> usize {
+    // The sidebar body's side padding is 10px on each side.
+    let inner = sidebar_width - px(20.);
+    if inner >= px(48.) * 4. + FAVORITE_GAP * 3. {
+        4
+    } else {
+        3
+    }
+}
+
+/// A folder name being edited in place.
+pub(crate) struct FolderRename {
+    space: SpaceId,
+    group: GroupId,
+    input: Entity<InputState>,
+    _events: Subscription,
+}
 
 /// Data needed to build tab and group context menus.
 #[derive(Clone)]
@@ -94,7 +121,18 @@ impl BrowserWindow {
                     }))
                     .on_drop(cx.listener(|this, dragged: &DraggedGroup, _, cx| {
                         this.drop_group(dragged, GroupPlacement::SectionEnd(Section::Unpinned), cx);
-                    })),
+                    }))
+                    .context_menu({
+                        let this = menu.this.clone();
+                        move |popup, _, _| {
+                            popup.item(
+                                entity_item(&this, "New Folder", |this, window, cx| {
+                                    this.new_folder(window, cx);
+                                })
+                                .icon(IconName::FolderPlus),
+                            )
+                        }
+                    }),
             );
 
         let animated = body.with_animation(
@@ -138,10 +176,15 @@ impl BrowserWindow {
             .into_any_element()
     }
 
+    /// Favorites as a grid of tiles at the top of the sidebar, like Dia:
+    /// four to a row (three when the sidebar is narrow), stretching with
+    /// the sidebar's width. The next free slot is a dashed tile that adds
+    /// the current tab, and the whole grid takes dropped tabs.
     fn render_favorites(&self, menu: &MenuContext, cx: &mut Context<Self>) -> AnyElement {
         let theme = *CurioTheme::get(cx);
         let active = self.workspace.active_tab_id();
-        let tiles: Vec<AnyElement> = self
+        let columns = favorite_columns(self.sidebar_width);
+        let mut tiles: Vec<AnyElement> = self
             .workspace
             .favorites()
             .iter()
@@ -154,14 +197,13 @@ impl BrowserWindow {
                     SharedString::from(format!("fav-{fav_id}")),
                     Favicon::new(title.clone())
                         .url(favorite.tab.favicon_url.as_deref())
-                        .size(px(20.)),
+                        .size(px(18.)),
                 )
                 .filled(true)
                 .selected(Some(id) == active)
-                .h(px(44.))
                 .flex_1()
-                .min_w(px(44.))
-                .max_w(relative(0.25))
+                .min_w_0()
+                .h(FAVORITE_TILE_HEIGHT)
                 .rounded(px(10.))
                 .tooltip_text(title)
                 .on_click(cx.listener(move |this, _, window, cx| this.activate_tab(id, window, cx)))
@@ -183,17 +225,68 @@ impl BrowserWindow {
                 .into_any_element()
             })
             .collect();
-        div()
+
+        // The next free slot invites a new favorite. A full last row skips
+        // it rather than start a row of one; the grid still takes drops.
+        if !tiles.len().is_multiple_of(columns) || tiles.is_empty() {
+            let edge = Hsla {
+                a: 0.28,
+                ..theme.text_faint
+            };
+            tiles.push(
+                div()
+                    .id("fav-add")
+                    .flex_1()
+                    .min_w_0()
+                    .h(FAVORITE_TILE_HEIGHT)
+                    .rounded(px(10.))
+                    .border_1()
+                    .border_dashed()
+                    .border_color(edge)
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .text_color(theme.text_faint)
+                    .cursor_pointer()
+                    .hover(|s| s.bg(theme.row_hover).text_color(theme.text_muted))
+                    .active(|s| s.opacity(0.7))
+                    .child(Icon::new(IconName::Plus).small())
+                    .tooltip_text("Add Current Tab to Favorites")
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        if let Some(id) = this.workspace.active_tab_id() {
+                            this.add_favorite(id, window, cx);
+                        }
+                    }))
+                    .into_any_element(),
+            );
+        }
+
+        // Fixed columns: the last row is padded so every tile keeps its width.
+        let mut rows: Vec<AnyElement> = Vec::with_capacity(tiles.len().div_ceil(columns));
+        let mut tiles = tiles.into_iter().peekable();
+        while tiles.peek().is_some() {
+            let row: Vec<AnyElement> = tiles.by_ref().take(columns).collect();
+            let padding = columns - row.len();
+            rows.push(
+                h_flex()
+                    .gap(FAVORITE_GAP)
+                    .children(row)
+                    .children((0..padding).map(|_| div().flex_1().min_w_0()))
+                    .into_any_element(),
+            );
+        }
+
+        v_flex()
             .id("favorites")
             .pt(px(2.))
-            .pb(px(8.))
-            .drag_over::<DraggedTab>(move |s, _, _, _| s.bg(theme.accent_soft).rounded(px(10.)))
+            .pb(px(10.))
+            .gap(FAVORITE_GAP)
+            .rounded(px(12.))
+            .drag_over::<DraggedTab>(move |s, _, _, _| s.bg(theme.accent_soft))
             .on_drop(cx.listener(|this, dragged: &DraggedTab, window, cx| {
                 this.add_favorite(dragged.id, window, cx);
             }))
-            .when(!tiles.is_empty(), |el| {
-                el.child(h_flex().flex_wrap().gap(px(6.)).children(tiles))
-            })
+            .children(rows)
             .into_any_element()
     }
 
@@ -328,6 +421,8 @@ impl BrowserWindow {
             return div().into_any_element();
         };
         let (active, pinned) = (tab.active, tab.pinned);
+        // Pinned tabs and tabs in folders are kept when "closed".
+        let saved = pinned || group.is_some();
         let menu = menu.clone();
         ListItem::new(SharedString::from(format!("tab-{id}")))
             .group("tab-row")
@@ -349,20 +444,16 @@ impl BrowserWindow {
             .child(
                 IconButton::new(
                     SharedString::from(format!("close-{id}")),
-                    if pinned { IconName::Minus } else { IconName::X },
+                    if saved { IconName::Minus } else { IconName::X },
                 )
                 .xsmall()
                 .reveal_on_hover("tab-row")
                 .force_visible(active)
                 .text_color(theme.text_faint)
-                .tooltip(if pinned { "Unload Tab" } else { "Close Tab" })
+                .tooltip(if saved { "Unload Tab" } else { "Close Tab" })
                 .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                     cx.stop_propagation();
-                    if pinned {
-                        this.unload_tab(id, window, cx);
-                    } else {
-                        this.close_tab(id, window, cx);
-                    }
+                    this.close_or_unload_tab(id, window, cx);
                 })),
             )
             .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
@@ -376,7 +467,7 @@ impl BrowserWindow {
             }))
             .on_aux_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
                 if event.is_middle_click() {
-                    this.close_tab(id, window, cx);
+                    this.close_or_unload_tab(id, window, cx);
                 }
             }))
             .on_drag(tab.drag(), |dragged, _, _, cx| cx.new(|_| dragged.clone()))
@@ -414,10 +505,9 @@ impl BrowserWindow {
             name: SharedString::from(group.name.clone()),
         };
         let menu = menu.clone();
+        // Same height, icon size and text as a tab row.
         ListItem::new(SharedString::from(format!("group-{id}")))
             .muted(true)
-            .h(px(30.))
-            .gap(px(8.))
             .leading(
                 h_flex()
                     .gap(px(8.))
@@ -443,12 +533,24 @@ impl BrowserWindow {
                             } else {
                                 IconName::FolderOpen
                             })
-                            .small(),
+                            .size(Favicon::DEFAULT_SIZE),
                         ),
                     ),
             )
-            .title(group.name.clone())
-            .title_weight(FontWeight::MEDIUM)
+            .map(
+                |el| match self.folder_rename.as_ref().filter(|r| r.group == id) {
+                    // Editing the name: the field replaces the title. Mouse
+                    // downs stay in the field so they don't fold or drag.
+                    Some(rename) => el.child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                            .child(Input::new(&rename.input).small().appearance(false).px_0()),
+                    ),
+                    None => el.title(group.name.clone()),
+                },
+            )
             .when(collapsed, |el| {
                 el.child(
                     div()
@@ -457,8 +559,13 @@ impl BrowserWindow {
                         .child(SharedString::from(group.tabs.len().to_string())),
                 )
             })
-            .on_click(cx.listener(move |this, _, _, cx| {
+            .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
+                // The first click of a double-click already folded or
+                // unfolded the folder, so the second puts that back.
                 this.set_group_collapsed(space_id, id, !collapsed, cx);
+                if event.click_count() >= 2 {
+                    this.rename_group(space_id, id, window, cx);
+                }
             }))
             .on_drag(drag, |dragged, _, _, cx| cx.new(|_| dragged.clone()))
             .drag_over::<DraggedTab>(move |s, _, _, _| s.bg(theme.accent_soft))
@@ -628,6 +735,81 @@ impl BrowserWindow {
         }
     }
 
+    /// Starts editing a folder's name in place in the sidebar. Enter or
+    /// clicking away saves; Escape cancels.
+    pub(crate) fn rename_group(
+        &mut self,
+        space: SpaceId,
+        group: GroupId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // Folders only show in the vertical sidebar.
+        if self.layout(cx) == TabLayout::Horizontal {
+            return;
+        }
+        self.commit_folder_rename(cx);
+        let Some(current) = self
+            .workspace
+            .space(space)
+            .and_then(|s| s.strip.group(group))
+            .map(|g| g.name.clone())
+        else {
+            return;
+        };
+        let input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("Folder name")
+                .default_value(current)
+        });
+        input.update(cx, |input, cx| {
+            input.focus(window, cx);
+            input.select_all(window, cx);
+        });
+        let events =
+            cx.subscribe_in(
+                &input,
+                window,
+                |this, _, event: &InputEvent, window, cx| match event {
+                    InputEvent::PressEnter { .. } => {
+                        this.commit_folder_rename(cx);
+                        window.focus(&this.focus_handle, cx);
+                    }
+                    InputEvent::Blur => this.commit_folder_rename(cx),
+                    InputEvent::Change | InputEvent::Focus => {}
+                },
+            );
+        self.folder_rename = Some(FolderRename {
+            space,
+            group,
+            input,
+            _events: events,
+        });
+        cx.notify();
+    }
+
+    /// Saves the folder name being edited. A blank name keeps the old one.
+    pub(crate) fn commit_folder_rename(&mut self, cx: &mut Context<Self>) {
+        let Some(rename) = self.folder_rename.take() else {
+            return;
+        };
+        let name = rename.input.read(cx).value().to_string();
+        if let Some(space) = self.workspace.space_mut(rename.space)
+            && space.strip.rename_group(rename.group, &name)
+        {
+            self.schedule_save(cx);
+        }
+        cx.notify();
+    }
+
+    /// Stops editing a folder name without saving it.
+    pub(crate) fn cancel_folder_rename(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.folder_rename.take().is_some() {
+            window.focus(&self.focus_handle, cx);
+            cx.notify();
+        }
+    }
+
     /// Folds or unfolds a tab group.
     pub(crate) fn set_group_collapsed(
         &mut self,
@@ -644,7 +826,8 @@ impl BrowserWindow {
     }
 
     pub(crate) fn unload_tab(&mut self, id: TabId, window: &mut Window, cx: &mut Context<Self>) {
-        // Pinned tabs are kept; "closing" them unloads the page instead.
+        // Pinned tabs and tabs in folders are kept; "closing" them unloads
+        // the page and resets it to its home URL instead.
         if let Some(entity) = self.tabs.get(&id).cloned() {
             entity.update(cx, |tab, cx| tab.sleep(cx));
         }
@@ -676,7 +859,12 @@ impl BrowserWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.workspace.active_space().strip.is_pinned(id) {
+        let saved = self
+            .workspace
+            .space_of_tab(id)
+            .and_then(|space| self.workspace.space(space))
+            .is_some_and(|space| space.strip.is_saved(id));
+        if saved {
             self.unload_tab(id, window, cx);
         } else {
             self.close_tab(id, window, cx);
@@ -887,6 +1075,7 @@ fn tab_menu(
     cx: &mut Context<PopupMenu>,
 ) -> PopupMenu {
     let this = &ctx.this;
+    let saved = pinned || group.is_some();
     let spaces = ctx.spaces.clone();
     let current_space = ctx.current_space;
     let groups = ctx.groups.clone();
@@ -933,9 +1122,9 @@ fn tab_menu(
             .icon(IconName::Sparkles),
         )
         .separator()
-        .submenu("Move to Group", window, cx, move |mut menu, _, _| {
+        .submenu("Move to Folder", window, cx, move |mut menu, _, _| {
             menu = menu.item(
-                entity_item(&group_this, "New Group…", move |this, window, cx| {
+                entity_item(&group_this, "New Folder…", move |this, window, cx| {
                     this.new_group_with(vec![id], window, cx);
                 })
                 .icon(IconName::FolderPlus),
@@ -957,7 +1146,7 @@ fn tab_menu(
         });
     if group.is_some() {
         menu = menu.item(
-            entity_item(this, "Remove from Group", move |this, window, cx| {
+            entity_item(this, "Remove from Folder", move |this, window, cx| {
                 this.remove_tab_from_group(id, window, cx);
             })
             .icon(IconName::FolderMinus),
@@ -978,13 +1167,21 @@ fn tab_menu(
     .item(
         entity_item(
             this,
-            if pinned { "Unload Tab" } else { "Close Tab" },
+            if saved { "Unload Tab" } else { "Close Tab" },
             move |this, window, cx| {
                 this.close_or_unload_tab(id, window, cx);
             },
         )
         .icon(IconName::X),
     )
+    .when(saved, |menu| {
+        menu.item(
+            entity_item(this, "Delete Tab", move |this, window, cx| {
+                this.close_tab(id, window, cx);
+            })
+            .icon(IconName::Delete),
+        )
+    })
     .item(
         entity_item(this, "Close Other Tabs", move |this, window, cx| {
             this.close_other_tabs(id, window, cx);
@@ -993,7 +1190,7 @@ fn tab_menu(
     )
 }
 
-/// The context menu for a tab group.
+/// The context menu for a folder.
 fn group_menu(
     menu: PopupMenu,
     ctx: &MenuContext,
@@ -1007,7 +1204,7 @@ fn group_menu(
     let color_this = this.clone();
     let move_this = this.clone();
     menu.item(
-        entity_item(this, "Rename Group…", move |this, window, cx| {
+        entity_item(this, "Rename Folder", move |this, window, cx| {
             this.rename_group(space, group, window, cx);
         })
         .icon(IconName::Pencil),
@@ -1023,7 +1220,7 @@ fn group_menu(
         }
         menu
     })
-    .submenu("Move Group to Space", window, cx, move |mut menu, _, _| {
+    .submenu("Move Folder to Space", window, cx, move |mut menu, _, _| {
         for (sid, name, icon) in spaces.iter().filter(|(sid, ..)| *sid != space) {
             let sid = *sid;
             menu = menu.item(entity_item(
@@ -1036,15 +1233,32 @@ fn group_menu(
     })
     .separator()
     .item(
-        entity_item(this, "Ungroup Tabs", move |this, _, cx| {
+        entity_item(this, "Remove Folder, Keep Tabs", move |this, _, cx| {
             this.ungroup(space, group, cx)
         })
         .icon(IconName::FolderMinus),
     )
     .item(
-        entity_item(this, "Close Group and Tabs", move |this, window, cx| {
+        entity_item(this, "Delete Folder and Tabs", move |this, window, cx| {
             this.close_group(space, group, window, cx);
         })
         .icon(IconName::Delete),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn favorites_fit_four_across_unless_the_sidebar_is_narrow() {
+        // Default width and wider: four.
+        assert_eq!(favorite_columns(px(260.)), 4);
+        assert_eq!(favorite_columns(px(420.)), 4);
+        // Narrowest sidebar: three, so tiles stay at least 48px wide.
+        assert_eq!(favorite_columns(px(200.)), 3);
+        // The switch happens where four 48px tiles and their gaps stop fitting.
+        assert_eq!(favorite_columns(px(230.)), 4);
+        assert_eq!(favorite_columns(px(229.)), 3);
+    }
 }

@@ -1,6 +1,6 @@
 //! Dialogs: editing spaces and groups, confirmations, history, downloads.
 
-use curio_core::{GroupId, SpaceGradient, SpaceId, display_host};
+use curio_core::{SpaceGradient, SpaceId, display_host};
 use curio_spaces::SPACE_ICONS;
 use curio_storage::HistoryEntry;
 use gpui_kit::Focusable as _;
@@ -12,7 +12,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, AppContext as _, Context, Entity, FontWeight, InteractiveElement as _, IntoElement,
     ParentElement as _, Render, SharedString, StatefulInteractiveElement as _, Styled as _,
-    Subscription, WeakEntity, Window, div, px,
+    Subscription, Window, div, px,
 };
 
 use super::BrowserWindow;
@@ -172,17 +172,6 @@ impl Render for SpaceEditor {
     }
 }
 
-/// A one-field rename dialog body.
-struct RenameField {
-    input: Entity<InputState>,
-}
-
-impl Render for RenameField {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        div().child(Input::new(&self.input))
-    }
-}
-
 impl BrowserWindow {
     /// Opens the space editor; `None` creates a new space.
     pub(crate) fn edit_space(
@@ -332,83 +321,6 @@ impl BrowserWindow {
             self.sync_active_tab(window, cx);
             self.schedule_save(cx);
         }
-    }
-
-    pub(crate) fn rename_group(
-        &mut self,
-        space: SpaceId,
-        group: GroupId,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let current = self
-            .workspace
-            .space(space)
-            .and_then(|s| s.strip.group(group))
-            .map(|g| g.name.clone())
-            .unwrap_or_default();
-        let input = cx.new(|cx| {
-            InputState::new(window, cx)
-                .placeholder("Group name")
-                .default_value(current)
-        });
-        let field = cx.new(|_| RenameField {
-            input: input.clone(),
-        });
-        let focus = input.read(cx).focus_handle(cx);
-        window.focus(&focus, cx);
-        let this = cx.entity().downgrade();
-        let save = move |window: &mut Window,
-                         cx: &mut gpui_kit::App,
-                         input: &Entity<InputState>,
-                         this: &WeakEntity<BrowserWindow>| {
-            let name = input.read(cx).value().to_string();
-            let _ = this.update(cx, |this, cx| {
-                if let Some(space) = this.workspace.space_mut(space) {
-                    space.strip.rename_group(group, &name);
-                }
-                this.schedule_save(cx);
-                cx.notify();
-            });
-            window.close_dialog(cx);
-        };
-        let enter_input = input.clone();
-        let enter_this = this.clone();
-        let subscription = cx.subscribe_in(
-            &input,
-            window,
-            move |_, _, event: &InputEvent, window, cx| {
-                if matches!(event, InputEvent::PressEnter { .. }) {
-                    save(window, cx, &enter_input, &enter_this);
-                }
-            },
-        );
-        // The subscription lives as long as the dialog may be open.
-        self._subscriptions.push(subscription);
-        window.open_dialog(cx, move |dialog, _, _| {
-            let input = input.clone();
-            let this = this.clone();
-            dialog
-                .title("Rename Group")
-                .w(px(360.))
-                .child(field.clone())
-                .footer(
-                    dialog_footer()
-                        .child(
-                            Button::new("rename-cancel")
-                                .label("Cancel")
-                                .on_click(|_, window, cx| window.close_dialog(cx)),
-                        )
-                        .child(
-                            Button::new("rename-save")
-                                .primary()
-                                .label("Rename")
-                                .on_click(move |_, window, cx| {
-                                    save(window, cx, &input, &this);
-                                }),
-                        ),
-                )
-        });
     }
 
     /// Asks before opening a link in another application.
