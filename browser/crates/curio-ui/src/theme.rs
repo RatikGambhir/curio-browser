@@ -74,6 +74,10 @@ pub mod metrics {
     pub const PANEL_GAP: Pixels = px(8.);
     /// Space reserved for the macOS traffic lights in the sidebar header.
     pub const TRAFFIC_LIGHTS_WIDTH: Pixels = px(76.);
+    /// Where the macOS traffic lights sit: centered on a toolbar-height row
+    /// at the top of the window (the sidebar's top row, or the tab strip).
+    pub const TRAFFIC_LIGHTS_X: Pixels = px(14.);
+    pub const TRAFFIC_LIGHTS_Y: Pixels = px(15.);
     pub const TOOLBAR_HEIGHT: Pixels = px(44.);
 }
 

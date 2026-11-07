@@ -29,17 +29,26 @@ fn main() -> Result<()> {
     let settings = storage
         .with(|db| db.load_settings())
         .context("loading settings")?;
-    let workspace = if settings.browsing.restore_session {
+    let restored = if settings.browsing.restore_session {
         storage
             .with(|db| db.load_workspace())
             .unwrap_or_else(|error| {
                 tracing::error!(%error, "could not restore the previous session");
                 None
             })
-            .unwrap_or_else(Workspace::first_run)
     } else {
-        Workspace::first_run()
+        None
     };
+    let workspace = restored.unwrap_or_else(|| {
+        // A fresh session still keeps the Archived Tabs; otherwise the first
+        // save would erase them.
+        let mut workspace = Workspace::first_run();
+        match storage.with(|db| db.load_closed_tabs()) {
+            Ok(closed) => workspace.restore_closed_tabs(closed),
+            Err(error) => tracing::error!(%error, "could not load archived tabs"),
+        }
+        workspace
+    });
     let secrets = SecretStore::new(paths::data_dir()?);
     tracing::info!(
         engine = curio_browser_engine_name(),
@@ -94,7 +103,10 @@ fn main() -> Result<()> {
             titlebar: Some(TitlebarOptions {
                 title: Some("Curio".into()),
                 appears_transparent: true,
-                traffic_light_position: Some(point(px(14.), px(15.))),
+                traffic_light_position: Some(point(
+                    curio_ui::theme::metrics::TRAFFIC_LIGHTS_X,
+                    curio_ui::theme::metrics::TRAFFIC_LIGHTS_Y,
+                )),
             }),
             window_min_size: Some(size(px(720.), px(480.))),
             app_id: Some(curio_core::BUNDLE_ID.to_owned()),

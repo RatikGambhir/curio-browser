@@ -72,7 +72,8 @@ pub enum TabOwner {
 }
 
 /// A closed tab remembered for "Reopen Closed Tab" and the Library's
-/// Archived Tabs. Saved with the session, so it survives restarts.
+/// Archived Tabs. Saved to the database, so it survives restarts. It is kept
+/// even after its space is deleted, and then reopens in the active space.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ClosedTab {
     pub space: SpaceId,
@@ -248,7 +249,8 @@ impl Workspace {
             let next = index.min(self.spaces.len() - 1);
             self.active_space = self.spaces[next].id;
         }
-        self.closed.retain(|closed| closed.space != id);
+        // Closed tabs from this space stay in the archive; they reopen in
+        // the active space instead.
         Some(removed)
     }
 
@@ -350,9 +352,10 @@ impl Workspace {
         Some(id)
     }
 
-    /// Opens a tab in the active space, next to the active tab when it is a
-    /// regular tab (like Arc and Chrome), or at the top of the unpinned
-    /// section otherwise.
+    /// Opens a tab in the active space, next to the active tab (like Arc
+    /// and Chrome), below its folder when it's in one, or at the top of the
+    /// unpinned section when it's pinned. See
+    /// [`TabStrip::placement_for_new_tab`].
     pub fn open_tab_in_active_space(&mut self, tab: Tab, activate: bool) -> TabId {
         let space_id = self.active_space;
         let placement = self.placement_near_active();
@@ -363,15 +366,7 @@ impl Workspace {
 
     fn placement_near_active(&self) -> Placement {
         let space = self.active_space();
-        match space
-            .active_tab
-            .and_then(|id| space.strip.location_of(id).map(|l| (id, l)))
-        {
-            Some((id, location)) if location.section == Section::Unpinned => {
-                Placement::AfterTab(id)
-            }
-            _ => Placement::SectionStart(Section::Unpinned),
-        }
+        space.strip.placement_for_new_tab(space.active_tab)
     }
 
     /// Activates a tab, switching to its space when needed. Favorites open
@@ -416,29 +411,30 @@ impl Workspace {
     }
 
     /// Reopens the most recently closed tab in its original space and
-    /// position, and activates it.
+    /// position (or the active space if its own was deleted), and
+    /// activates it.
     pub fn reopen_closed_tab(&mut self) -> Option<TabId> {
-        while let Some(closed) = self.closed.pop_front() {
-            if self.space(closed.space).is_none() {
-                continue;
-            }
-            let id = closed.tab.id;
-            self.open_tab(closed.space, closed.tab, closed.restore_at, true)?;
-            self.active_space = closed.space;
-            return Some(id);
-        }
-        None
+        let closed = self.closed.pop_front()?;
+        Some(self.reopen(closed))
     }
 
-    /// Reopens one closed tab in its original space and position, and
-    /// activates it.
+    /// Reopens one closed tab in its original space and position (or the
+    /// active space if its own was deleted), and activates it.
     pub fn reopen_closed(&mut self, id: TabId) -> Option<TabId> {
         let index = self.closed.iter().position(|c| c.tab.id == id)?;
         let closed = self.closed.remove(index)?;
-        self.space(closed.space)?;
-        self.open_tab(closed.space, closed.tab, closed.restore_at, true)?;
-        self.active_space = closed.space;
-        Some(id)
+        Some(self.reopen(closed))
+    }
+
+    fn reopen(&mut self, closed: ClosedTab) -> TabId {
+        let id = closed.tab.id;
+        if self.space(closed.space).is_some() {
+            self.open_tab(closed.space, closed.tab, closed.restore_at, true);
+            self.active_space = closed.space;
+        } else {
+            self.open_tab_in_active_space(closed.tab, true);
+        }
+        id
     }
 
     /// Recently closed tabs, most recent first.
@@ -446,14 +442,11 @@ impl Workspace {
         self.closed.iter()
     }
 
-    /// Restores saved closed tabs, newest first. Tabs from spaces that no
-    /// longer exist are dropped, and only the newest [`CLOSED_TAB_LIMIT`]
-    /// are kept.
+    /// Restores saved closed tabs, newest first, keeping only the newest
+    /// [`CLOSED_TAB_LIMIT`]. Tabs whose space no longer exists are kept and
+    /// reopen in the active space.
     pub fn restore_closed_tabs(&mut self, closed: impl IntoIterator<Item = ClosedTab>) {
-        let mut closed: Vec<ClosedTab> = closed
-            .into_iter()
-            .filter(|c| self.space(c.space).is_some())
-            .collect();
+        let mut closed: Vec<ClosedTab> = closed.into_iter().collect();
         // Stable, so tabs closed in the same millisecond keep their order.
         closed.sort_by_key(|c| std::cmp::Reverse(c.closed_at));
         closed.truncate(CLOSED_TAB_LIMIT);
@@ -729,23 +722,59 @@ mod tests {
     }
 
     #[test]
-    fn restored_closed_tabs_are_newest_first_and_skip_missing_spaces() {
-        let (mut ws, a, _, ids) = workspace_with_tabs();
+    fn restored_closed_tabs_are_newest_first_and_keep_missing_spaces() {
+        let (mut ws, _, _, ids) = workspace_with_tabs();
         ws.close_tab(ids[0]).expect("tab exists");
         ws.close_tab(ids[1]).expect("tab exists");
         let mut saved: Vec<ClosedTab> = ws.closed_tabs().cloned().collect();
         saved[0].closed_at = 2_000;
         saved[1].closed_at = 3_000;
         let mut orphan = saved[0].clone();
+        orphan.tab = Tab::new("https://orphan.test");
         orphan.space = SpaceId::new();
+        orphan.closed_at = 1_000;
+        let orphan_id = orphan.tab.id;
         saved.push(orphan);
 
         let mut restored = ws.clone();
         restored.restore_closed_tabs(saved);
 
         let order: Vec<TabId> = restored.closed_tabs().map(|c| c.tab.id).collect();
-        assert_eq!(order, vec![ids[0], ids[1]]);
-        assert!(restored.closed_tabs().all(|c| c.space == a));
+        assert_eq!(order, vec![ids[0], ids[1], orphan_id]);
+    }
+
+    #[test]
+    fn a_new_tab_from_a_folder_tab_opens_below_the_folder() {
+        let (mut ws, a, _, ids) = workspace_with_tabs();
+        let folder = ws.space_mut(a).expect("space").strip.create_group(
+            "Reading",
+            AccentColor::Ocean,
+            &[ids[0]],
+        );
+        ws.activate_tab(ids[0]);
+
+        let new = ws.open_tab_in_active_space(Tab::new("https://new.test"), true);
+        let strip = &ws.active_space().strip;
+        assert_eq!(
+            strip.group(folder).map(|g| g.tabs.clone()),
+            Some(vec![ids[0]])
+        );
+        assert_eq!(strip.location_of(new).and_then(|l| l.group), None);
+        assert_eq!(strip.ordered_tab_ids()[1], new, "right below the folder");
+    }
+
+    #[test]
+    fn closed_tabs_outlive_their_space_and_reopen_in_the_active_one() {
+        let (mut ws, a, b, ids) = workspace_with_tabs();
+        ws.close_tab(ids[0]).expect("tab exists");
+        ws.switch_space(b);
+        assert!(ws.delete_space(a).is_some());
+        assert_eq!(ws.closed_tab_count(), 1, "archive keeps the tab");
+
+        assert_eq!(ws.reopen_closed(ids[0]), Some(ids[0]));
+        assert_eq!(ws.space_of_tab(ids[0]), Some(b));
+        assert_eq!(ws.active_tab_id(), Some(ids[0]));
+        assert_eq!(ws.closed_tab_count(), 0);
     }
 
     #[test]

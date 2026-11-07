@@ -26,8 +26,8 @@ browsable gallery of the user's own files, not just a download log.
      never starts a second scan while one is running.
   2. While the first scan runs and nothing has been found yet, the pane shows
      "Looking for images and videos…".
-  3. Results appear as a grid of **two tiles per row**, newest first (by file
-     modification time). Each tile shows a 96 pt preview (cover-cropped,
+  3. Results appear as a list of **one tile per row**, newest first (by file
+     modification time). Each tile shows a full-width 140 pt preview (cover-cropped,
      10 pt corners), the file name, and on a second line the folder it was
      found in ("Desktop", "Pictures", "Home", ...).
   4. Image previews load in the background as small thumbnails (longest

@@ -108,9 +108,10 @@ const COMMANDS: &[(&str, &str, IconName)] = &[
     ),
     ("curio::ToggleBookmark", "Bookmark Page", IconName::BookOpen),
     ("curio::DuplicateTab", "Duplicate Tab", IconName::Copy),
+    ("curio::NewFolder", "New Folder", IconName::FolderPlus),
     (
         "curio::NewGroupFromTab",
-        "New Group from Tab",
+        "New Folder from Tab",
         IconName::Folder,
     ),
     ("curio::CopyUrl", "Copy URL", IconName::Link),

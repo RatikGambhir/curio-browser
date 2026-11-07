@@ -4,6 +4,7 @@ use curio_ai::QuickAction;
 use curio_core::AccentColor;
 use curio_settings::TabLayout;
 use curio_spaces::TabOwner;
+use curio_tabs::{GroupPlacement, Section};
 use gpui_kit::component::WindowExt as _;
 use gpui_kit::{ClipboardItem, Context, Div, InteractiveElement as _, Stateful, Window};
 
@@ -31,8 +32,9 @@ impl BrowserWindow {
                 this.open_command_bar(CommandMode::EditUrl, window, cx);
             }))
             .on_action(cx.listener(|this, _: &CloseTab, window, cx| {
+                // Pinned tabs and tabs in folders are unloaded, not closed.
                 if let Some(id) = this.workspace.active_tab_id() {
-                    this.close_tab(id, window, cx);
+                    this.close_or_unload_tab(id, window, cx);
                 }
             }))
             .on_action(cx.listener(|this, _: &ReopenClosedTab, window, cx| {
@@ -60,6 +62,9 @@ impl BrowserWindow {
                 if let Some(id) = this.workspace.active_tab_id() {
                     this.new_group_with(vec![id], window, cx);
                 }
+            }))
+            .on_action(cx.listener(|this, _: &NewFolder, window, cx| {
+                this.new_folder(window, cx);
             }))
             .on_action(cx.listener(|this, _: &ToggleBookmark, window, cx| {
                 this.toggle_bookmark(window, cx);
@@ -198,14 +203,7 @@ impl BrowserWindow {
             )
             // Layout
             .on_action(cx.listener(|this, _: &ToggleSidebar, _, cx| {
-                if this.layout(cx) == TabLayout::Horizontal {
-                    return;
-                }
-                this.sidebar_peek = false;
-                this.library.close_immediately();
-                crate::update_settings(cx, |s| {
-                    s.appearance.sidebar_visible = !s.appearance.sidebar_visible
-                });
+                this.toggle_sidebar(cx);
             }))
             .on_action(
                 cx.listener(|this, _: &ToggleLibrary, window, cx| this.toggle_library(window, cx)),
@@ -298,7 +296,9 @@ impl BrowserWindow {
     }
 
     fn escape(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.command_mode.is_some() {
+        if self.folder_rename.is_some() {
+            self.cancel_folder_rename(window, cx);
+        } else if self.command_mode.is_some() {
             self.close_command_bar(window, cx);
         } else if self.find.open {
             self.close_find(window, cx);
@@ -355,6 +355,8 @@ impl BrowserWindow {
         }
     }
 
+    /// Makes a folder holding `members` where the first of them is, and
+    /// starts renaming it.
     pub(crate) fn new_group_with(
         &mut self,
         members: Vec<curio_core::TabId>,
@@ -367,22 +369,43 @@ impl BrowserWindow {
         let Some(space_id) = self.workspace.space_of_tab(first) else {
             return;
         };
-        let color = self
-            .workspace
-            .space(space_id)
-            .map_or(AccentColor::Ocean, |s| {
-                let used = s.strip.groups().count();
-                AccentColor::ALL[(used + 1) % AccentColor::ALL.len()]
-            });
+        let color = self.next_folder_color(space_id);
         let group = self
             .workspace
             .space_mut(space_id)
-            .map(|s| s.strip.create_group("New Group", color, &members));
+            .map(|s| s.strip.create_group("New Folder", color, &members));
         self.schedule_save(cx);
         cx.notify();
         if let Some(group) = group {
             self.rename_group(space_id, group, window, cx);
         }
+    }
+
+    /// Makes an empty folder at the top of the active space's tabs and
+    /// starts renaming it.
+    pub(crate) fn new_folder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let space_id = self.workspace.active_space_id();
+        let color = self.next_folder_color(space_id);
+        let strip = &mut self.workspace.active_space_mut().strip;
+        let group = strip.create_group("New Folder", color, &[]);
+        strip.move_group(group, GroupPlacement::SectionStart(Section::Unpinned));
+        if self.library.open {
+            self.close_library(window, cx);
+        }
+        if self.layout(cx) == TabLayout::Vertical && !self.sidebar_visible(cx) {
+            self.sidebar_peek = true;
+        }
+        self.schedule_save(cx);
+        cx.notify();
+        self.rename_group(space_id, group, window, cx);
+    }
+
+    /// Cycles through the accent colors so neighboring folders differ.
+    fn next_folder_color(&self, space: curio_core::SpaceId) -> AccentColor {
+        self.workspace.space(space).map_or(AccentColor::Ocean, |s| {
+            let used = s.strip.groups().count();
+            AccentColor::ALL[(used + 1) % AccentColor::ALL.len()]
+        })
     }
 
     fn toggle_bookmark(&mut self, window: &mut Window, cx: &mut Context<Self>) {
