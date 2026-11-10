@@ -4,17 +4,19 @@
 use std::time::Duration;
 
 use curio_ai::QuickAction;
-use curio_core::display_host;
+use curio_core::{TabId, display_host};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::{Icon, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, Context, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _,
-    SharedString, StatefulInteractiveElement as _, Styled as _, Window, deferred, div, px,
+    AnyElement, Context, FontWeight, InteractiveElement as _, IntoElement, MouseButton,
+    ParentElement as _, SharedString, StatefulInteractiveElement as _, Styled as _, Window,
+    deferred, div, px,
 };
 
 use super::BrowserWindow;
+use super::split::PaneRole;
 use crate::actions;
 use crate::components::prelude::*;
 use crate::theme::{CurioTheme, metrics};
@@ -26,26 +28,68 @@ impl BrowserWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let view = match self.visible_split() {
+            Some(split) => self.render_split(&split, page_bar, window, cx),
+            None => {
+                let active = self.workspace.active_tab_id();
+                self.render_page_card(active, PaneRole::Single, page_bar, window, cx)
+            }
+        };
+        let drop_zones = self.render_split_drop_zones(cx);
+
+        div()
+            .relative()
+            .flex_1()
+            .min_h_0()
+            .w_full()
+            .pb(metrics::PANEL_GAP)
+            .when(page_bar, |el| el.pt(metrics::PANEL_GAP))
+            .when(!self.ai_open, |el| el.pr(metrics::PANEL_GAP))
+            .when(!self.left_column_visible(cx), |el| {
+                el.pl(metrics::PANEL_GAP)
+            })
+            .child(view)
+            .children(drop_zones)
+            .into_any_element()
+    }
+
+    /// One page on its card: the web page (or the new tab page) with its
+    /// loading, find and selection overlays, under the page bar. A split
+    /// pane that isn't focused gets a slimmer header, and only the focused
+    /// page shows find and selection tools.
+    pub(super) fn render_page_card(
+        &mut self,
+        tab_id: Option<TabId>,
+        role: PaneRole,
+        page_bar: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = *CurioTheme::get(cx);
-        let active = self.workspace.active_tab().cloned();
-        let entity = self.active_tab_entity().cloned();
+        let focused = role.focused();
+        let is_new_tab_page = tab_id
+            .and_then(|id| self.workspace.tab(id))
+            .is_none_or(curio_core::Tab::is_new_tab_page);
+        let entity = tab_id.and_then(|id| self.tabs.get(&id)).cloned();
         let state = entity.as_ref().map(|e| e.read(cx).state().clone());
         let webview = entity.as_ref().and_then(|e| e.read(cx).webview().cloned());
-        let show_page = active.as_ref().is_some_and(|t| !t.is_new_tab_page()) && webview.is_some();
+        let show_page = !is_new_tab_page && webview.is_some();
 
-        let page: AnyElement = match (&active, webview) {
-            (Some(tab), Some(webview)) if !tab.is_new_tab_page() => {
+        let page: AnyElement = match webview {
+            Some(webview) if !is_new_tab_page => {
                 div().size_full().child(webview).into_any_element()
             }
             _ => self.render_new_tab_page(window, cx),
         };
 
         let loading = show_page && state.as_ref().is_some_and(|s| s.loading);
-        let stalled = show_page && state.as_ref().is_some_and(|s| s.stalled);
+        let stalled = focused && show_page && state.as_ref().is_some_and(|s| s.stalled);
         let selection = state
             .as_ref()
             .and_then(|s| s.selection.clone())
-            .filter(|s| show_page && s.text.chars().count() >= 2 && self.command_mode.is_none());
+            .filter(|s| {
+                focused && show_page && s.text.chars().count() >= 2 && self.command_mode.is_none()
+            });
 
         // The page and its overlays; the page bar (if any) sits above it.
         let mut card = div()
@@ -97,30 +141,43 @@ impl BrowserWindow {
                     ),
             ));
         }
-        if self.find.open {
+        if focused && self.find.open {
             card = card.child(deferred(self.render_find_bar(cx)));
         }
         if let Some(selection) = selection {
             card = card.child(deferred(self.render_selection_actions(&selection.text, cx)));
         }
 
-        let card = v_flex()
+        let header = match (page_bar, role) {
+            (false, _) => None,
+            (
+                true,
+                PaneRole::Split {
+                    focused: false,
+                    first,
+                },
+            ) => tab_id.map(|tab| self.render_pane_header(tab, first, cx)),
+            (true, _) => Some(self.render_page_bar(cx)),
+        };
+        let in_split = matches!(role, PaneRole::Split { .. });
+        v_flex()
             .id("page-card")
             .size_full()
             .card(&theme)
-            .when(page_bar, |el| el.child(self.render_page_bar(cx)))
-            .child(card);
-
-        div()
-            .flex_1()
-            .min_h_0()
-            .w_full()
-            .pb(metrics::PANEL_GAP)
-            .when(page_bar, |el| el.pt(metrics::PANEL_GAP))
-            .when(!self.ai_open, |el| el.pr(metrics::PANEL_GAP))
-            .when(!self.left_column_visible(cx), |el| {
-                el.pl(metrics::PANEL_GAP)
+            // The focused pane of a split is outlined in the accent.
+            .when(in_split && focused, |el| el.border_color(theme.accent))
+            .when(in_split && !focused, |el| {
+                // Clicking anywhere on an unfocused pane's chrome focuses it.
+                el.when_some(tab_id, |el, tab| {
+                    el.on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _, window, cx| {
+                            this.activate_tab(tab, window, cx);
+                        }),
+                    )
+                })
             })
+            .children(header)
             .child(card)
             .into_any_element()
     }

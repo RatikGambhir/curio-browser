@@ -290,6 +290,21 @@ impl BrowserWindow {
             .child(div().w(px(6.)).flex_shrink_0())
             .child(address)
             .child(div().flex_1().min_w(px(12.)))
+            // In a split view, the focused pane can leave it from here.
+            .when_some(
+                self.workspace
+                    .active_tab_id()
+                    .filter(|_| self.visible_split().is_some()),
+                |el, tab| {
+                    el.child(
+                        IconButton::new("pane-separate", IconName::Unlink)
+                            .tooltip("Remove from Split View")
+                            .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                                this.remove_tab_from_split(tab, window, cx);
+                            })),
+                    )
+                },
+            )
             .child(assistant_button(self.ai_open))
             .child(downloads_button())
             .into_any_element()

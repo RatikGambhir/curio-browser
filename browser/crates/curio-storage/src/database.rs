@@ -9,7 +9,7 @@ use curio_core::chat::{
 use curio_core::time::{Timestamp, now_ms};
 use curio_core::{
     AccentColor, ConversationId, Favorite, FavoriteId, GroupId, SpaceGradient, SpaceId, Tab,
-    TabGroup, TabId,
+    TabGroup, TabId, TabSplit,
 };
 use curio_settings::Settings;
 use curio_spaces::{ClosedTab, Space, Workspace};
@@ -191,7 +191,8 @@ impl Database {
         let tx = self.conn.transaction()?;
         tx.execute_batch(
             "DELETE FROM spaces; DELETE FROM tabs; DELETE FROM tab_groups;
-             DELETE FROM layout; DELETE FROM favorites; DELETE FROM closed_tabs;",
+             DELETE FROM layout; DELETE FROM favorites; DELETE FROM closed_tabs;
+             DELETE FROM tab_splits;",
         )?;
         {
             let mut insert_space = tx.prepare(
@@ -213,6 +214,8 @@ impl Database {
             )?;
             let mut insert_favorite =
                 tx.prepare("INSERT INTO favorites (id, position) VALUES (?1, ?2)")?;
+            let mut insert_split =
+                tx.prepare("INSERT INTO tab_splits (id, space_id, data) VALUES (?1, ?2, ?3)")?;
 
             let mut write_tab = |tab: &Tab, kind: &str, owner: String| -> rusqlite::Result<()> {
                 insert_tab.execute(params![
@@ -264,6 +267,11 @@ impl Database {
                             tab.to_string(),
                         ])?;
                     }
+                }
+                for split in space.strip.splits() {
+                    let data = serde_json::to_string(split)
+                        .map_err(|error| StorageError::Corrupt(error.to_string()))?;
+                    insert_split.execute(params![split.id.to_string(), space_id, data])?;
                 }
                 for (section, items) in [("pinned", pinned), ("unpinned", unpinned)] {
                     for (position, item) in items.iter().enumerate() {
@@ -418,6 +426,24 @@ impl Database {
             }
         }
 
+        // Split views by space. Unreadable rows (from a newer build) are
+        // skipped; their tabs show as ordinary tabs.
+        let mut splits_by_space: HashMap<String, Vec<TabSplit>> = HashMap::new();
+        {
+            let mut stmt = self
+                .conn
+                .prepare("SELECT space_id, data FROM tab_splits ORDER BY id")?;
+            let rows =
+                stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+            for row in rows {
+                let (space, data) = row?;
+                match serde_json::from_str::<TabSplit>(&data) {
+                    Ok(split) => splits_by_space.entry(space).or_default().push(split),
+                    Err(error) => tracing::warn!(%error, "skipping unreadable split view"),
+                }
+            }
+        }
+
         let mut spaces = Vec::new();
         {
             let mut stmt = self.conn.prepare(
@@ -459,7 +485,8 @@ impl Database {
                     }
                 }
                 let tabs = tabs_by_owner.remove(&id).unwrap_or_default();
-                let strip = TabStrip::from_parts(tabs, groups, pinned, unpinned);
+                let splits = splits_by_space.remove(&id).unwrap_or_default();
+                let strip = TabStrip::from_parts(tabs, groups, pinned, unpinned, splits);
                 let active_tab = active_tab.as_deref().map(parse_id::<TabId>).transpose()?;
                 spaces.push(Space {
                     id: parse_id::<SpaceId>(&id)?,
@@ -1230,6 +1257,60 @@ mod tests {
         assert_eq!(empty.color, AccentColor::Rose);
         assert!(empty.tabs.is_empty());
         assert_eq!(loaded.space(space), ws.space(space));
+    }
+
+    #[test]
+    fn split_views_survive_a_restart_in_their_space_and_folder() {
+        let mut db = Database::open_in_memory().expect("db");
+        let mut ws = sample_workspace();
+        let space = ws.spaces()[0].id;
+        for url in ["https://left.test", "https://right.test"] {
+            ws.open_tab(
+                space,
+                Tab::new(url),
+                Placement::SectionEnd(Section::Unpinned),
+                false,
+            );
+        }
+        let (folder, top_split, folder_split, ids) = {
+            let strip = &mut ws.space_mut(space).expect("space").strip;
+            let ids = strip.ordered_tab_ids();
+            let folder = strip.create_group("Compare", AccentColor::Ocean, &[ids[0]]);
+            let folder_split = strip
+                .create_split(&[ids[0], ids[1]], curio_core::SplitOrientation::Vertical)
+                .expect("split in folder");
+            strip.resize_split(folder_split, 0, 0.15);
+            let rest: Vec<TabId> = strip
+                .ordered_tab_ids()
+                .into_iter()
+                .filter(|t| !strip.is_saved(*t))
+                .collect();
+            let top_split = strip
+                .create_split(&rest[..2], curio_core::SplitOrientation::Horizontal)
+                .expect("top-level split");
+            (folder, top_split, folder_split, ids)
+        };
+        db.save_workspace(&ws).expect("save");
+        let loaded = db.load_workspace().expect("load").expect("some");
+        let strip = &loaded.space(space).expect("space").strip;
+
+        let in_folder = strip.split(folder_split).expect("folder split kept");
+        assert_eq!(in_folder.tabs, vec![ids[0], ids[1]]);
+        assert_eq!(
+            in_folder.orientation,
+            curio_core::SplitOrientation::Vertical
+        );
+        assert!((in_folder.sizes[0] - 0.65).abs() < 1e-5);
+        assert_eq!(
+            strip.group(folder).map(|g| g.tabs.clone()),
+            Some(vec![ids[0], ids[1]]),
+            "the split stays in its folder"
+        );
+        assert!(strip.split(top_split).is_some());
+        assert_eq!(
+            strip.ordered_tab_ids(),
+            ws.space(space).expect("space").strip.ordered_tab_ids()
+        );
     }
 
     #[test]

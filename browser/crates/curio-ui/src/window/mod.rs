@@ -11,17 +11,19 @@ mod dialogs;
 mod drag;
 mod library;
 mod sidebar;
+mod split;
 mod tabs;
 mod thumbnails;
 mod toolbar;
 mod view_model;
 
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use curio_browser::{BrowserTab, EngineConfig, FindResult};
-use curio_core::TabId;
+use curio_core::{SplitId, TabId};
 use curio_settings::TabLayout;
 use curio_spaces::Workspace;
 use curio_storage::HistoryEntry;
@@ -49,6 +51,8 @@ use sidebar::FolderRename;
 pub(crate) enum Resize {
     Sidebar,
     AiPanel,
+    /// The divider after pane `.1` of a split view.
+    SplitDivider(SplitId, usize),
 }
 
 /// A download shown in the downloads list.
@@ -85,6 +89,9 @@ pub struct BrowserWindow {
     pub(crate) sidebar_width: Pixels,
     pub(crate) ai_width: Pixels,
     resizing: Option<Resize>,
+    /// Where the visible split view was laid out last frame, so its
+    /// dividers can follow the mouse.
+    split_bounds: Rc<Cell<gpui_kit::Bounds<Pixels>>>,
     /// The sidebar is temporarily shown over the page while hidden.
     pub(crate) sidebar_peek: bool,
     /// The folder whose name is being edited in the sidebar, if any.
@@ -205,6 +212,7 @@ impl BrowserWindow {
             sidebar_width: px(settings.appearance.sidebar_width),
             ai_width: px(settings.appearance.ai_panel_width),
             resizing: None,
+            split_bounds: Rc::default(),
             sidebar_peek: false,
             folder_rename: None,
             space_transition: 0,
@@ -509,19 +517,34 @@ impl BrowserWindow {
                 let width = window.viewport_size().width - event.position.x;
                 self.ai_width = width.clamp(px(300.), px(640.));
             }
+            Resize::SplitDivider(split, divider) => {
+                if !self.drag_split_divider(split, divider, event.position) {
+                    return;
+                }
+            }
         }
         cx.notify();
     }
 
     fn finish_resize(&mut self, cx: &mut Context<Self>) {
-        if self.resizing.take().is_some() {
-            let sidebar = f32::from(self.sidebar_width);
-            let ai = f32::from(self.ai_width);
-            crate::update_settings(cx, |s| {
-                s.appearance.sidebar_width = sidebar;
-                s.appearance.ai_panel_width = ai;
-            });
+        match self.resizing.take() {
+            None => {}
+            Some(Resize::SplitDivider(..)) => {
+                // Pane sizes are part of the split, saved with the space.
+                self.schedule_save(cx);
+                cx.notify();
+            }
+            Some(Resize::Sidebar | Resize::AiPanel) => self.save_panel_widths(cx),
         }
+    }
+
+    fn save_panel_widths(&mut self, cx: &mut Context<Self>) {
+        let sidebar = f32::from(self.sidebar_width);
+        let ai = f32::from(self.ai_width);
+        crate::update_settings(cx, |s| {
+            s.appearance.sidebar_width = sidebar;
+            s.appearance.ai_panel_width = ai;
+        });
     }
 
     pub(crate) fn resize_handle(&self, which: Resize, cx: &mut Context<Self>) -> impl IntoElement {
@@ -531,6 +554,7 @@ impl BrowserWindow {
             .id(match which {
                 Resize::Sidebar => "resize-sidebar",
                 Resize::AiPanel => "resize-ai",
+                Resize::SplitDivider(..) => "resize-split",
             })
             .w(px(6.))
             .h_full()

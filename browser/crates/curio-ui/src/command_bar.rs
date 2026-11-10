@@ -115,6 +115,12 @@ const COMMANDS: &[(&str, &str, IconName)] = &[
         IconName::Folder,
     ),
     ("curio::CopyUrl", "Copy URL", IconName::Link),
+    ("curio::SplitView", "Split View", IconName::Columns2),
+    (
+        "curio::SeparateSplitView",
+        "Separate Split View",
+        IconName::Unlink,
+    ),
     (
         "curio::ReopenClosedTab",
         "Reopen Closed Tab",

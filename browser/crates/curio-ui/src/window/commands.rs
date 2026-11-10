@@ -66,6 +66,12 @@ impl BrowserWindow {
             .on_action(cx.listener(|this, _: &NewFolder, window, cx| {
                 this.new_folder(window, cx);
             }))
+            .on_action(cx.listener(|this, _: &SplitView, window, cx| {
+                this.split_view(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &SeparateSplitView, window, cx| {
+                this.separate_split_view(window, cx);
+            }))
             .on_action(cx.listener(|this, _: &ToggleBookmark, window, cx| {
                 this.toggle_bookmark(window, cx);
             }))

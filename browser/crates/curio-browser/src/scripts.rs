@@ -54,6 +54,9 @@ const BRIDGE_TEMPLATE: &str = r#"
     if (e.button === 1) openLink(e, true);
   }, true);
 
+  // Clicking into the page, so a split view pane becomes the active tab.
+  document.addEventListener('pointerdown', () => send('focus'), { capture: true, passive: true });
+
   // Text selection, for "Ask Curio" actions.
   let selectionTimer = 0;
   let lastSelection = '';

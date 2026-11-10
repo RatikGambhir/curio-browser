@@ -32,6 +32,8 @@ pub enum PageMessage {
     UrlChanged { url: String, title: String },
     /// A browser shortcut was pressed while the page had focus.
     Key { keystroke: String },
+    /// The user clicked into the page.
+    Focused,
 }
 
 #[derive(Deserialize)]
@@ -110,6 +112,7 @@ pub fn parse_message(body: &str, token: &str, allowed_keys: &[String]) -> Option
             url: web_url(raw.url.as_deref()?)?,
             title: raw.title.unwrap_or_default().chars().take(500).collect(),
         }),
+        "focus" => Some(PageMessage::Focused),
         "key" => {
             let keystroke = raw.keystroke?;
             allowed_keys
@@ -128,6 +131,14 @@ mod tests {
 
     fn keys() -> Vec<String> {
         vec!["cmd-t".into()]
+    }
+
+    #[test]
+    fn focus_messages_need_the_token() {
+        let ok = r#"{"token":"secret","type":"focus"}"#;
+        assert_eq!(parse_message(ok, T, &keys()), Some(PageMessage::Focused));
+        let bad = r#"{"token":"nope","type":"focus"}"#;
+        assert!(parse_message(bad, T, &keys()).is_none());
     }
 
     #[test]

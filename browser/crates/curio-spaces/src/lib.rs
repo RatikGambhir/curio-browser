@@ -390,7 +390,19 @@ impl Workspace {
     pub fn close_tab(&mut self, id: TabId) -> Option<Closed> {
         let space_id = self.space_of_tab(id)?;
         let space = self.space_mut(space_id)?;
-        let next = space.strip.neighbor_for_close(id);
+        // Closing a pane of a split view shows the pane beside it.
+        let next = space
+            .strip
+            .split_of(id)
+            .and_then(|split| {
+                let index = split.tabs.iter().position(|t| *t == id)?;
+                split
+                    .tabs
+                    .get(index + 1)
+                    .or_else(|| index.checked_sub(1).and_then(|i| split.tabs.get(i)))
+                    .copied()
+            })
+            .or_else(|| space.strip.neighbor_for_close(id));
         let removed = space.strip.remove(id)?;
         if space.active_tab == Some(id) {
             space.active_tab = next;
@@ -486,6 +498,7 @@ impl Workspace {
     }
 
     /// Moves a tab to another space (to the top of its unpinned section).
+    /// A tab in a split view takes the whole split with it.
     pub fn move_tab_to_space(&mut self, id: TabId, target: SpaceId) -> bool {
         let Some(source) = self.space_of_tab(id) else {
             return false;
@@ -496,20 +509,56 @@ impl Workspace {
         let Some(source_space) = self.space_mut(source) else {
             return false;
         };
-        let next = source_space.strip.neighbor_for_close(id);
-        let Some(removed) = source_space.strip.remove(id) else {
+        let split = source_space.strip.split_of(id).cloned();
+        let members = split.as_ref().map_or_else(|| vec![id], |s| s.tabs.clone());
+        let mut moved = Vec::with_capacity(members.len());
+        for member in &members {
+            let next = source_space.strip.neighbor_for_close(*member);
+            if let Some(removed) = source_space.strip.remove(*member) {
+                if source_space.active_tab == Some(*member) {
+                    source_space.active_tab = next.filter(|n| !members.contains(n));
+                }
+                moved.push(removed.tab);
+            }
+        }
+        if source_space
+            .active_tab
+            .is_some_and(|t| members.contains(&t))
+        {
+            source_space.active_tab = source_space.strip.ordered_tab_ids().first().copied();
+        }
+        if moved.is_empty() {
+            return false;
+        }
+        let Some(target_space) = self.space_mut(target) else {
             return false;
         };
-        if source_space.active_tab == Some(id) {
-            source_space.active_tab = next;
+        let mut previous: Option<TabId> = None;
+        for tab in moved {
+            let placement = previous.map_or(
+                Placement::SectionStart(Section::Unpinned),
+                Placement::AfterTab,
+            );
+            previous = Some(target_space.strip.insert(tab, placement));
         }
-        self.open_tab(
-            target,
-            removed.tab,
-            Placement::SectionStart(Section::Unpinned),
-            false,
-        )
-        .is_some()
+        if let Some(split) = split
+            && let Some(new_id) = target_space
+                .strip
+                .create_split(&split.tabs, split.orientation)
+        {
+            // Keep the pane sizes the user chose.
+            for (divider, pair) in split.sizes.windows(2).enumerate() {
+                let current = target_space
+                    .strip
+                    .split(new_id)
+                    .and_then(|s| s.sizes.get(divider).copied())
+                    .unwrap_or(pair[0]);
+                target_space
+                    .strip
+                    .resize_split(new_id, divider, pair[0] - current);
+            }
+        }
+        true
     }
 
     /// Moves a whole group (and its tabs) to another space.
@@ -525,17 +574,17 @@ impl Workspace {
         let Some(source_space) = self.space_mut(source) else {
             return false;
         };
-        let Some((group, tabs, section)) = source_space.strip.take_group(group) else {
+        let Some(taken) = source_space.strip.take_group(group) else {
             return false;
         };
         if let Some(active) = source_space.active_tab
-            && tabs.iter().any(|t| t.id == active)
+            && taken.tabs.iter().any(|t| t.id == active)
         {
             source_space.active_tab = source_space.strip.ordered_tab_ids().first().copied();
         }
         match self.space_mut(target) {
             Some(target) => {
-                target.strip.insert_group(group, tabs, section);
+                target.strip.insert_group(taken);
                 true
             }
             None => false,
@@ -775,6 +824,47 @@ mod tests {
         assert_eq!(ws.space_of_tab(ids[0]), Some(b));
         assert_eq!(ws.active_tab_id(), Some(ids[0]));
         assert_eq!(ws.closed_tab_count(), 0);
+    }
+
+    #[test]
+    fn a_split_moves_to_another_space_as_a_whole() {
+        let (mut ws, a, b, ids) = workspace_with_tabs();
+        let strip = &mut ws.space_mut(a).expect("space").strip;
+        let split = strip
+            .create_split(&[ids[0], ids[2]], curio_core::SplitOrientation::Vertical)
+            .expect("split");
+        strip.resize_split(split, 0, 0.2);
+        ws.activate_tab(ids[2]);
+
+        assert!(ws.move_tab_to_space(ids[2], b));
+        assert_eq!(ws.space_of_tab(ids[0]), Some(b));
+        assert_eq!(ws.space_of_tab(ids[2]), Some(b));
+        let moved = ws
+            .space(b)
+            .and_then(|s| s.strip.split_of(ids[0]))
+            .expect("split kept");
+        assert_eq!(moved.tabs, vec![ids[0], ids[2]]);
+        assert_eq!(moved.orientation, curio_core::SplitOrientation::Vertical);
+        assert!((moved.sizes[0] - 0.7).abs() < 1e-5, "sizes kept");
+        assert_eq!(ws.space(a).and_then(|s| s.active_tab), Some(ids[1]));
+    }
+
+    #[test]
+    fn closing_a_pane_shows_the_pane_beside_it() {
+        let (mut ws, a, _, ids) = workspace_with_tabs();
+        ws.space_mut(a)
+            .expect("space")
+            .strip
+            .create_split(&[ids[0], ids[2]], curio_core::SplitOrientation::Horizontal);
+        // Order is now 0, 2, 1: the next tab in the list after 2 is 1.
+        ws.activate_tab(ids[2]);
+        let closed = ws.close_tab(ids[2]).expect("tab exists");
+        assert_eq!(
+            closed.next_active,
+            Some(ids[0]),
+            "the other pane, not the next tab"
+        );
+        assert!(ws.active_space().strip.split_of(ids[0]).is_none());
     }
 
     #[test]

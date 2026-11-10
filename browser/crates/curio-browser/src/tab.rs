@@ -87,6 +87,8 @@ pub enum BrowserTabEvent {
     },
     /// The selection changed.
     SelectionChanged,
+    /// The user clicked into the page.
+    Focused,
     /// The page scrolled (debounced).
     Scrolled {
         y: f64,
@@ -454,6 +456,7 @@ impl BrowserTab {
                 }
             }
             PageMessage::Key { keystroke } => cx.emit(BrowserTabEvent::Shortcut { keystroke }),
+            PageMessage::Focused => cx.emit(BrowserTabEvent::Focused),
         }
     }
 

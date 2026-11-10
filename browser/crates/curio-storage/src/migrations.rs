@@ -112,6 +112,15 @@ const MIGRATIONS: &[&str] = &[
         position INTEGER PRIMARY KEY,
         data TEXT NOT NULL
     );",
+    // v4: split views. Each row is a JSON `TabSplit` (panes, sizes and
+    // orientation) of one space. Older builds ignore the table and show the
+    // split's tabs as ordinary tabs.
+    "CREATE TABLE tab_splits (
+        id TEXT PRIMARY KEY,
+        space_id TEXT NOT NULL,
+        data TEXT NOT NULL
+    );
+    CREATE INDEX tab_splits_space ON tab_splits(space_id);",
 ];
 
 /// The schema version this build expects.

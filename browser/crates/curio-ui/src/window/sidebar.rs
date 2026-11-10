@@ -3,7 +3,7 @@
 
 use std::time::Duration;
 
-use curio_core::{GroupId, SpaceId, TabId};
+use curio_core::{GroupId, SpaceId, SplitId, SplitOrientation, TabId};
 use curio_settings::TabLayout;
 use curio_spaces::TabOwner;
 use curio_tabs::{GroupPlacement, Item, Placement, Row, Section};
@@ -19,6 +19,7 @@ use gpui_kit::{
     StatefulInteractiveElement as _, Styled as _, Subscription, WeakEntity, Window, div, px,
 };
 
+use super::split::DropSide;
 use super::{BrowserWindow, DraggedGroup, DraggedTab};
 use crate::components::prelude::*;
 use crate::theme::{CurioTheme, metrics};
@@ -56,6 +57,16 @@ pub(crate) struct MenuContext {
     pub spaces: Vec<(SpaceId, String, String)>,
     pub current_space: SpaceId,
     pub groups: Vec<(GroupId, String)>,
+    /// The active tab, when it can be shown in a split view (it belongs to
+    /// the space, not the favorites).
+    pub splittable_active: Option<TabId>,
+}
+
+/// What a tab's menu needs to know about its split view.
+#[derive(Clone, Copy)]
+pub(crate) struct SplitMenu {
+    pub id: SplitId,
+    pub orientation: SplitOrientation,
 }
 
 impl BrowserWindow {
@@ -77,6 +88,7 @@ impl BrowserWindow {
                 .collect(),
             current_space: space.id,
             groups,
+            splittable_active: space.active_tab.filter(|t| space.strip.contains(*t)),
         }
     }
 
@@ -337,7 +349,9 @@ impl BrowserWindow {
         let mut divider_done = false;
         for row in rows {
             let section = match row {
-                Row::Tab { section, .. } | Row::Group { section, .. } => section,
+                Row::Tab { section, .. }
+                | Row::Group { section, .. }
+                | Row::Split { section, .. } => section,
             };
             if section == Section::Unpinned && !divider_done {
                 out.push(self.render_new_tab_divider(has_pinned, cx));
@@ -346,6 +360,7 @@ impl BrowserWindow {
             out.push(match row {
                 Row::Tab { id, group, .. } => self.render_tab_row(id, group, menu, window, cx),
                 Row::Group { id, .. } => self.render_group_row(id, menu, cx),
+                Row::Split { id, group, .. } => self.render_split_row(id, group, menu, cx),
             });
         }
         if !divider_done {
@@ -481,7 +496,127 @@ impl BrowserWindow {
                 }))
             })
             .context_menu(move |popup, window, cx| {
-                tab_menu(popup, &menu, id, pinned, group, window, cx)
+                tab_menu(popup, &menu, id, pinned, group, None, window, cx)
+            })
+            .into_any_element()
+    }
+
+    /// A split view's row: its tabs side by side in one rounded box, like
+    /// Arc. Each part shows and focuses one pane; dragging any part moves
+    /// the whole split.
+    fn render_split_row(
+        &self,
+        id: SplitId,
+        group: Option<GroupId>,
+        menu: &MenuContext,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = *CurioTheme::get(cx);
+        let Some(split) = self.workspace.active_space().strip.split(id) else {
+            return div().into_any_element();
+        };
+        let first = split.tabs[0];
+        let split_menu = SplitMenu {
+            id,
+            orientation: split.orientation,
+        };
+        let holds_active = self
+            .workspace
+            .active_tab_id()
+            .is_some_and(|t| split.contains(t));
+        let mut parts: Vec<AnyElement> = Vec::with_capacity(split.tabs.len() * 2);
+        for (index, tab_id) in split.tabs.iter().copied().enumerate() {
+            let Some(tab) = self.tab_view(tab_id, cx) else {
+                continue;
+            };
+            if index > 0 {
+                parts.push(
+                    div()
+                        .w(px(1.))
+                        .h(px(16.))
+                        .flex_shrink_0()
+                        .bg(theme.divider)
+                        .into_any_element(),
+                );
+            }
+            let (active, pinned) = (tab.active, tab.pinned);
+            let menu = menu.clone();
+            parts.push(
+                ListItem::new(SharedString::from(format!("split-{id}-{tab_id}")))
+                    .muted(true)
+                    .selected(active)
+                    .flex_1()
+                    .min_w_0()
+                    .h(metrics::ROW_HEIGHT - px(6.))
+                    .px(px(6.))
+                    .gap(px(6.))
+                    .leading(
+                        div()
+                            .when(tab.asleep && !active, |el| el.opacity(0.65))
+                            .child(
+                                Favicon::new(tab.title.clone())
+                                    .url(tab.favicon.as_deref())
+                                    .loading(tab.loading),
+                            ),
+                    )
+                    .title(tab.title.clone())
+                    .when(active, |el| el.title_weight(FontWeight::MEDIUM))
+                    .tooltip_text(tab.title.clone())
+                    .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
+                        if event.modifiers().secondary(cx) {
+                            this.attach_tab_to_ai(tab_id, window, cx);
+                        } else {
+                            this.activate_tab(tab_id, window, cx);
+                            this.focus_page_or_window(window, cx);
+                        }
+                    }))
+                    .on_aux_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
+                        if event.is_middle_click() {
+                            this.close_or_unload_tab(tab_id, window, cx);
+                        }
+                    }))
+                    .on_drag(tab.drag(), |dragged, _, _, cx| cx.new(|_| dragged.clone()))
+                    .context_menu(move |popup, window, cx| {
+                        tab_menu(
+                            popup,
+                            &menu,
+                            tab_id,
+                            pinned,
+                            group,
+                            Some(split_menu),
+                            window,
+                            cx,
+                        )
+                    })
+                    .into_any_element(),
+            );
+        }
+        h_flex()
+            .id(SharedString::from(format!("split-{id}")))
+            .w_full()
+            .h(metrics::ROW_HEIGHT)
+            .when(group.is_some(), |el| el.pl(px(14.)))
+            .child(
+                h_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .h_full()
+                    .p(px(2.))
+                    .gap(px(2.))
+                    .rounded(metrics::ROW_RADIUS)
+                    .border_1()
+                    .border_color(theme.divider)
+                    .when(holds_active, |el| el.bg(theme.row_hover))
+                    .children(parts),
+            )
+            .drag_over::<DraggedTab>(move |s, _, _, _| s.border_t_2().border_color(theme.accent))
+            .on_drop(cx.listener(move |this, dragged: &DraggedTab, window, cx| {
+                this.drop_tab(dragged.id, Placement::BeforeTab(first), window, cx);
+            }))
+            .when(group.is_none(), |el| {
+                el.on_drop(cx.listener(move |this, dragged: &DraggedGroup, _, cx| {
+                    this.drop_group(dragged, GroupPlacement::BeforeItem(Item::Tab(first)), cx);
+                }))
             })
             .into_any_element()
     }
@@ -827,7 +962,18 @@ impl BrowserWindow {
 
     pub(crate) fn unload_tab(&mut self, id: TabId, window: &mut Window, cx: &mut Context<Self>) {
         // Pinned tabs and tabs in folders are kept; "closing" them unloads
-        // the page and resets it to its home URL instead.
+        // the page and resets it to its home URL instead. An unloaded tab
+        // leaves its split view, which would otherwise load it again.
+        let mut other_pane = None;
+        if let Some(space) = self.workspace.space_of_tab(id)
+            && let Some(space) = self.workspace.space_mut(space)
+        {
+            other_pane = space
+                .strip
+                .split_of(id)
+                .and_then(|split| split.tabs.iter().copied().find(|t| *t != id));
+            space.strip.remove_from_split(id);
+        }
         if let Some(entity) = self.tabs.get(&id).cloned() {
             entity.update(cx, |tab, cx| tab.sleep(cx));
         }
@@ -839,13 +985,14 @@ impl BrowserWindow {
         }
         self.release_tab(id);
         if self.workspace.active_tab_id() == Some(id) {
-            let next = self
-                .workspace
-                .active_space()
-                .strip
-                .ordered_tab_ids()
-                .into_iter()
-                .find(|t| *t != id);
+            let next = other_pane.or_else(|| {
+                self.workspace
+                    .active_space()
+                    .strip
+                    .ordered_tab_ids()
+                    .into_iter()
+                    .find(|t| *t != id)
+            });
             self.workspace.active_space_mut().active_tab = next;
         }
         self.sync_active_tab(window, cx);
@@ -1064,17 +1211,19 @@ pub(crate) fn space_menu(
     )
 }
 
-/// The context menu for a tab.
+/// The context menu for a tab, with split view items when it's in one.
 fn tab_menu(
     menu: PopupMenu,
     ctx: &MenuContext,
     id: TabId,
     pinned: bool,
     group: Option<GroupId>,
+    split: Option<SplitMenu>,
     window: &mut Window,
     cx: &mut Context<PopupMenu>,
 ) -> PopupMenu {
     let this = &ctx.this;
+    let menu = split_items(menu, ctx, id, split);
     let saved = pinned || group.is_some();
     let spaces = ctx.spaces.clone();
     let current_space = ctx.current_space;
@@ -1188,6 +1337,60 @@ fn tab_menu(
         })
         .icon(IconName::CircleX),
     )
+}
+
+/// The split view part of a tab's menu: managing the split the tab is in,
+/// or showing it beside the active tab.
+fn split_items(
+    menu: PopupMenu,
+    ctx: &MenuContext,
+    id: TabId,
+    split: Option<SplitMenu>,
+) -> PopupMenu {
+    let this = &ctx.this;
+    match split {
+        Some(split) => {
+            let split_id = split.id;
+            let (flip_label, flip_icon) = match split.orientation {
+                SplitOrientation::Horizontal => ("Stack Panes", IconName::Rows2),
+                SplitOrientation::Vertical => ("Show Side by Side", IconName::Columns2),
+            };
+            menu.item(
+                entity_item(this, "Remove from Split View", move |this, window, cx| {
+                    this.remove_tab_from_split(id, window, cx);
+                })
+                .icon(IconName::SquareSplitHorizontal),
+            )
+            .item(
+                entity_item(this, flip_label, move |this, _, cx| {
+                    this.flip_split(split_id, cx);
+                })
+                .icon(flip_icon),
+            )
+            .item(
+                entity_item(this, "Equal Pane Sizes", move |this, _, cx| {
+                    this.equalize_split(split_id, cx);
+                })
+                .icon(IconName::Equal),
+            )
+            .item(
+                entity_item(this, "Separate Split View", move |this, window, cx| {
+                    this.dissolve_split(split_id, window, cx);
+                })
+                .icon(IconName::Unlink),
+            )
+            .separator()
+        }
+        None if ctx.splittable_active.is_some_and(|active| active != id) => menu
+            .item(
+                entity_item(this, "Open in Split View", move |this, window, cx| {
+                    this.split_with(id, DropSide::After, window, cx);
+                })
+                .icon(IconName::Columns2),
+            )
+            .separator(),
+        None => menu,
+    }
 }
 
 /// The context menu for a folder.

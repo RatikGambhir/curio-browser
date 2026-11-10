@@ -78,20 +78,22 @@ impl BrowserWindow {
         self.tab_subscriptions.remove(&id);
     }
 
-    /// Makes the workspace's active tab visible and every other tab hidden,
-    /// creating the active tab's webview on demand.
+    /// Makes the workspace's active tab visible (with the other panes of
+    /// its split view, if any) and every other tab hidden, creating webviews
+    /// on demand.
     pub(crate) fn sync_active_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let active = self.workspace.active_tab_id();
+        let visible = self.visible_tab_ids();
         for (id, entity) in &self.tabs {
-            if Some(*id) != active && entity.read(cx).is_active() {
+            if !visible.contains(id) && entity.read(cx).is_active() {
                 entity.update(cx, |tab, cx| tab.set_active(false, window, cx));
             }
         }
-        if let Some(active) = active
-            && let Some(entity) = self.ensure_tab_entity(active, window, cx)
-            && !entity.read(cx).is_active()
-        {
-            entity.update(cx, |tab, cx| tab.set_active(true, window, cx));
+        for id in visible {
+            if let Some(entity) = self.ensure_tab_entity(id, window, cx)
+                && !entity.read(cx).is_active()
+            {
+                entity.update(cx, |tab, cx| tab.set_active(true, window, cx));
+            }
         }
         let title = self
             .workspace
@@ -421,6 +423,14 @@ impl BrowserWindow {
             BrowserTabEvent::SelectionChanged => {
                 if self.workspace.active_tab_id() == Some(id) {
                     cx.notify();
+                }
+            }
+            BrowserTabEvent::Focused => {
+                // Clicking into another pane of the split view focuses it.
+                if self.workspace.active_tab_id() != Some(id)
+                    && self.visible_split().is_some_and(|s| s.contains(id))
+                {
+                    self.activate_tab(id, window, cx);
                 }
             }
             BrowserTabEvent::Scrolled { y } => {

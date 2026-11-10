@@ -81,6 +81,10 @@ define_id!(
     FavoriteId
 );
 define_id!(
+    /// Identifies a split view: tabs shown side by side.
+    SplitId
+);
+define_id!(
     /// Identifies an AI conversation.
     ConversationId
 );

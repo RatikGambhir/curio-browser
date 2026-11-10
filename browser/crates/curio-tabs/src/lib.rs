@@ -5,10 +5,15 @@
 //! A [`TabStrip`] has two sections. Each section is an ordered list of
 //! [`Item`]s, where an item is either a top-level tab or a group that holds
 //! its own ordered list of tabs. Groups never nest.
+//!
+//! Tabs can also be shown together in a [`TabSplit`] (split view). A split's
+//! tabs stay ordinary tabs of the strip, but they are always kept next to
+//! each other, in pane order, in the same section or folder. Moving any of
+//! them moves the whole split, so a split lives in exactly one place.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
-use curio_core::{AccentColor, GroupId, Tab, TabGroup, TabId};
+use curio_core::{AccentColor, GroupId, SplitId, SplitOrientation, Tab, TabGroup, TabId, TabSplit};
 use serde::{Deserialize, Serialize};
 
 /// One of the two sidebar sections of a space.
@@ -76,6 +81,16 @@ pub struct RemovedTab {
     pub restore_at: Placement,
 }
 
+/// A group taken out of a strip with everything needed to put it in
+/// another one: its tabs and the splits among them.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TakenGroup {
+    pub group: TabGroup,
+    pub tabs: Vec<Tab>,
+    pub splits: Vec<TabSplit>,
+    pub section: Section,
+}
+
 /// A row of the flattened sidebar, in display order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Row {
@@ -88,6 +103,12 @@ pub enum Row {
         id: GroupId,
         section: Section,
     },
+    /// A split view, shown as one row in place of its tabs.
+    Split {
+        id: SplitId,
+        section: Section,
+        group: Option<GroupId>,
+    },
 }
 
 /// The tabs and groups of one space.
@@ -98,6 +119,7 @@ pub struct TabStrip {
     groups: HashMap<GroupId, TabGroup>,
     pinned: Vec<Item>,
     unpinned: Vec<Item>,
+    splits: HashMap<SplitId, TabSplit>,
 }
 
 impl TabStrip {
@@ -115,6 +137,7 @@ impl TabStrip {
         groups: Vec<TabGroup>,
         pinned: Vec<Item>,
         unpinned: Vec<Item>,
+        splits: Vec<TabSplit>,
     ) -> Self {
         let tabs: HashMap<TabId, Tab> = tabs.into_iter().map(|t| (t.id, t)).collect();
         let mut groups: HashMap<GroupId, TabGroup> =
@@ -142,6 +165,7 @@ impl TabStrip {
             groups,
             pinned,
             unpinned,
+            splits: splits.into_iter().map(|s| (s.id, s)).collect(),
         };
         // Tabs that are not referenced anywhere are appended so no data is lost.
         let orphans: Vec<TabId> = strip
@@ -170,6 +194,7 @@ impl TabStrip {
         strip
             .unpinned
             .extend(unreferenced.into_iter().map(Item::Group));
+        strip.repair_splits();
         strip
     }
 
@@ -291,6 +316,12 @@ impl TabStrip {
     /// inside a folder or in the pinned section.
     #[must_use]
     pub fn placement_for_new_tab(&self, anchor: Option<TabId>) -> Placement {
+        // A tab opened from a split goes after the whole split.
+        let anchor = anchor.map(|id| {
+            self.split_of(id)
+                .and_then(|split| split.tabs.last().copied())
+                .unwrap_or(id)
+        });
         let location = anchor.and_then(|id| self.location_of(id).map(|loc| (id, loc)));
         match location {
             Some((id, loc)) if loc.section == Section::Unpinned => match loc.group {
@@ -329,6 +360,7 @@ impl TabStrip {
         self.tabs.insert(id, tab);
         self.attach(id, placement);
         self.sync_home(id);
+        self.repair_splits();
         id
     }
 
@@ -425,15 +457,24 @@ impl TabStrip {
     pub fn remove(&mut self, id: TabId) -> Option<RemovedTab> {
         let restore_at = self.detach(id)?;
         let tab = self.tabs.remove(&id)?;
+        self.repair_splits();
         Some(RemovedTab { tab, restore_at })
     }
 
     /// Moves a tab. Moving a tab relative to itself is a no-op.
+    ///
+    /// Moving a tab that is part of a split moves the whole split: its first
+    /// pane goes to `placement` and the others follow it.
     pub fn move_tab(&mut self, id: TabId, placement: Placement) -> bool {
         if !self.contains(id) {
             return false;
         }
-        if matches!(placement, Placement::BeforeTab(a) | Placement::AfterTab(a) if a == id) {
+        let (id, members) = match self.split_of(id) {
+            Some(split) => (split.tabs[0], split.tabs.clone()),
+            None => (id, vec![id]),
+        };
+        if matches!(placement, Placement::BeforeTab(a) | Placement::AfterTab(a) if members.contains(&a))
+        {
             return false;
         }
         if self.detach(id).is_none() {
@@ -441,6 +482,7 @@ impl TabStrip {
         }
         self.attach(id, placement);
         self.sync_home(id);
+        self.repair_splits();
         true
     }
 
@@ -551,9 +593,12 @@ impl TabStrip {
         };
         let items = self.items_mut(section);
         items.remove(index);
-        if keep_tabs {
+        let removed = if keep_tabs {
             for (offset, tab) in group.tabs.iter().enumerate() {
                 items.insert(index + offset, Item::Tab(*tab));
+            }
+            for tab in &group.tabs {
+                self.sync_home(*tab);
             }
             Vec::new()
         } else {
@@ -562,7 +607,9 @@ impl TabStrip {
                 .iter()
                 .filter_map(|tab| self.tabs.remove(tab))
                 .collect()
-        }
+        };
+        self.repair_splits();
+        removed
     }
 
     /// Moves a group to a new top-level position.
@@ -607,30 +654,51 @@ impl TabStrip {
             Some(i) => items.insert(i.min(items.len()), item),
             None => items.push(item),
         }
+        // Dropping a folder next to a split's inner tab would separate it.
+        self.repair_splits();
         true
     }
 
-    /// Removes a group and its tabs so they can move to another space.
-    pub fn take_group(&mut self, id: GroupId) -> Option<(TabGroup, Vec<Tab>, Section)> {
+    /// Removes a group with its tabs and splits so they can move to another
+    /// space.
+    pub fn take_group(&mut self, id: GroupId) -> Option<TakenGroup> {
         let (section, index) = self.group_location(id)?;
         self.items_mut(section).remove(index);
         let group = self.groups.remove(&id)?;
-        let tabs = group
+        let tabs: Vec<Tab> = group
             .tabs
             .iter()
             .filter_map(|tab| self.tabs.remove(tab))
             .collect();
-        Some((group, tabs, section))
+        let inside: Vec<SplitId> = self
+            .splits
+            .values()
+            .filter(|split| split.tabs.iter().any(|t| group.tabs.contains(t)))
+            .map(|split| split.id)
+            .collect();
+        let splits = inside
+            .into_iter()
+            .filter_map(|split| self.splits.remove(&split))
+            .collect();
+        self.repair_splits();
+        Some(TakenGroup {
+            group,
+            tabs,
+            splits,
+            section,
+        })
     }
 
-    /// Adds a group (with its tabs) at the end of `section`. Tab membership
-    /// is taken from `group.tabs`; tabs not listed there are appended.
-    pub fn insert_group(
-        &mut self,
-        mut group: TabGroup,
-        tabs: Vec<Tab>,
-        section: Section,
-    ) -> GroupId {
+    /// Adds a group (with its tabs and splits) at the end of its section.
+    /// Tab membership is taken from `group.tabs`; tabs not listed there are
+    /// appended.
+    pub fn insert_group(&mut self, taken: TakenGroup) -> GroupId {
+        let TakenGroup {
+            mut group,
+            tabs,
+            splits,
+            section,
+        } = taken;
         let id = group.id;
         for tab in tabs {
             if !group.tabs.contains(&tab.id) {
@@ -641,6 +709,8 @@ impl TabStrip {
         group.tabs.retain(|t| self.tabs.contains_key(t));
         self.groups.insert(id, group);
         self.items_mut(section).push(Item::Group(id));
+        self.splits.extend(splits.into_iter().map(|s| (s.id, s)));
+        self.repair_splits();
         id
     }
 
@@ -666,17 +736,28 @@ impl TabStrip {
     /// Flattened rows for rendering. Tabs inside collapsed groups are
     /// omitted unless they are `always_show` (typically the active tab, which
     /// stays visible under its collapsed folder as in Arc).
+    ///
+    /// A split is one [`Row::Split`] where its first tab would be; its other
+    /// tabs get no row of their own.
     #[must_use]
     pub fn rows(&self, always_show: Option<TabId>) -> Vec<Row> {
         let mut rows = Vec::with_capacity(self.tabs.len() + self.groups.len());
+        // The split the always-shown tab belongs to stays visible with it.
+        let always_split = always_show.and_then(|id| self.split_of(id)).map(|s| s.id);
+        let row_for = |id: TabId, section: Section, group: Option<GroupId>| match self.split_of(id)
+        {
+            Some(split) if split.tabs[0] == id => Some(Row::Split {
+                id: split.id,
+                section,
+                group,
+            }),
+            Some(_) => None,
+            None => Some(Row::Tab { id, section, group }),
+        };
         for section in [Section::Pinned, Section::Unpinned] {
             for item in self.items(section) {
                 match item {
-                    Item::Tab(id) => rows.push(Row::Tab {
-                        id: *id,
-                        section,
-                        group: None,
-                    }),
+                    Item::Tab(id) => rows.extend(row_for(*id, section, None)),
                     Item::Group(group_id) => {
                         let Some(group) = self.groups.get(group_id) else {
                             continue;
@@ -686,12 +767,12 @@ impl TabStrip {
                             section,
                         });
                         for tab in &group.tabs {
-                            if !group.collapsed || Some(*tab) == always_show {
-                                rows.push(Row::Tab {
-                                    id: *tab,
-                                    section,
-                                    group: Some(*group_id),
-                                });
+                            let shown = !group.collapsed
+                                || Some(*tab) == always_show
+                                || (always_split.is_some()
+                                    && self.split_of(*tab).map(|s| s.id) == always_split);
+                            if shown {
+                                rows.extend(row_for(*tab, section, Some(*group_id)));
                             }
                         }
                     }
@@ -722,6 +803,184 @@ impl TabStrip {
             &self.pinned,
             &self.unpinned,
         )
+    }
+
+    // ----- Split view ---------------------------------------------------
+
+    /// Every split, in unspecified order.
+    pub fn splits(&self) -> impl Iterator<Item = &TabSplit> {
+        self.splits.values()
+    }
+
+    /// Looks up a split.
+    #[must_use]
+    pub fn split(&self, id: SplitId) -> Option<&TabSplit> {
+        self.splits.get(&id)
+    }
+
+    /// The split a tab is shown in, if any.
+    #[must_use]
+    pub fn split_of(&self, tab: TabId) -> Option<&TabSplit> {
+        // Splits are few (a handful per space), so a scan beats keeping a
+        // reverse index in sync.
+        self.splits.values().find(|split| split.contains(tab))
+    }
+
+    /// Shows `tabs` side by side. They are taken out of any split they were
+    /// in and gathered next to the first of them, in its section or folder.
+    /// Tabs the strip doesn't own are ignored; returns `None` unless at
+    /// least two remain.
+    pub fn create_split(
+        &mut self,
+        tabs: &[TabId],
+        orientation: SplitOrientation,
+    ) -> Option<SplitId> {
+        let members: Vec<TabId> = tabs.iter().copied().filter(|t| self.contains(*t)).collect();
+        let split = TabSplit::new(&members, orientation);
+        if !split.is_valid() {
+            return None;
+        }
+        for tab in &split.tabs {
+            self.detach_from_split(*tab);
+        }
+        let id = split.id;
+        self.splits.insert(id, split);
+        self.repair_splits();
+        Some(id)
+    }
+
+    /// Adds `tab` to a split as the pane at `index` (clamped to the end).
+    /// The tab leaves any other split and moves next to the split's other
+    /// tabs.
+    pub fn add_to_split(&mut self, split: SplitId, tab: TabId, index: usize) -> bool {
+        if !self.contains(tab)
+            || self
+                .splits
+                .get(&split)
+                .is_none_or(|s| s.is_full() || s.contains(tab))
+        {
+            return false;
+        }
+        self.detach_from_split(tab);
+        let added = self
+            .splits
+            .get_mut(&split)
+            .is_some_and(|s| s.add_tab(tab, index));
+        self.repair_splits();
+        added
+    }
+
+    /// Takes a tab out of its split and puts it right after the split. A
+    /// split left with one tab is dissolved.
+    pub fn remove_from_split(&mut self, tab: TabId) -> bool {
+        let Some(last) = self.detach_from_split(tab) else {
+            return false;
+        };
+        if last != tab {
+            self.move_tab(tab, Placement::AfterTab(last));
+        }
+        self.repair_splits();
+        true
+    }
+
+    /// Dissolves a split; its tabs stay where they are as ordinary tabs.
+    pub fn dissolve_split(&mut self, id: SplitId) -> bool {
+        self.splits.remove(&id).is_some()
+    }
+
+    /// Moves the divider after pane `divider` (see [`TabSplit::resize`]).
+    pub fn resize_split(&mut self, id: SplitId, divider: usize, delta: f32) -> bool {
+        self.splits
+            .get_mut(&id)
+            .is_some_and(|split| split.resize(divider, delta))
+    }
+
+    /// Gives every pane of a split the same room.
+    pub fn equalize_split(&mut self, id: SplitId) -> bool {
+        self.splits.get_mut(&id).map(TabSplit::equalize).is_some()
+    }
+
+    /// Switches a split between side by side and stacked.
+    pub fn flip_split(&mut self, id: SplitId) -> bool {
+        self.splits
+            .get_mut(&id)
+            .map(|split| split.orientation = split.orientation.flipped())
+            .is_some()
+    }
+
+    /// Takes a tab out of its split without moving it. Returns the split's
+    /// last remaining pane (or the tab itself when the split dissolved).
+    fn detach_from_split(&mut self, tab: TabId) -> Option<TabId> {
+        let id = self.split_of(tab)?.id;
+        let split = self.splits.get_mut(&id)?;
+        split.remove_tab(tab);
+        if split.is_valid() {
+            split.tabs.last().copied()
+        } else {
+            let last = split.tabs.last().copied();
+            self.splits.remove(&id);
+            last.or(Some(tab))
+        }
+    }
+
+    /// Keeps every split consistent with the strip: drops panes whose tabs
+    /// are gone (and splits left too small), a tab in two splits stays in
+    /// the first, and each split's tabs are gathered after its first pane,
+    /// in pane order, in the same section or folder.
+    fn repair_splits(&mut self) {
+        if self.splits.is_empty() {
+            return;
+        }
+        let mut ids: Vec<SplitId> = self.splits.keys().copied().collect();
+        ids.sort_unstable();
+        let mut seen = HashSet::new();
+        for id in &ids {
+            let tabs = &self.tabs;
+            let Some(split) = self.splits.get_mut(id) else {
+                continue;
+            };
+            let before = split.tabs.len();
+            split
+                .tabs
+                .retain(|t| tabs.contains_key(t) && seen.insert(*t));
+            if split.tabs.len() != before {
+                split.equalize();
+            } else {
+                split.normalize();
+            }
+            if !split.is_valid() {
+                self.splits.remove(id);
+            }
+        }
+        for id in ids {
+            let Some(members) = self.splits.get(&id).map(|s| s.tabs.clone()) else {
+                continue;
+            };
+            if self.is_contiguous(&members) {
+                continue;
+            }
+            for pair in members.windows(2) {
+                let (prev, tab) = (pair[0], pair[1]);
+                if self.detach(tab).is_some() {
+                    self.attach(tab, Placement::AfterTab(prev));
+                    self.sync_home(tab);
+                }
+            }
+        }
+    }
+
+    /// Whether `members` sit next to each other, in order, in one container.
+    fn is_contiguous(&self, members: &[TabId]) -> bool {
+        let Some(first) = members.first().and_then(|t| self.location_of(*t)) else {
+            return false;
+        };
+        members.iter().enumerate().skip(1).all(|(offset, tab)| {
+            self.location_of(*tab).is_some_and(|loc| {
+                loc.section == first.section
+                    && loc.group == first.group
+                    && loc.index == first.index + offset
+            })
+        })
     }
 }
 
@@ -852,10 +1111,10 @@ mod tests {
     fn take_and_insert_group_moves_whole_group() {
         let (mut strip, ids) = strip_with(3);
         let group = strip.create_group("Move me", AccentColor::Amber, &[ids[0], ids[1]]);
-        let (g, tabs, section) = strip.take_group(group).expect("group exists");
+        let taken = strip.take_group(group).expect("group exists");
         assert_eq!(strip.len(), 1);
         let mut other = TabStrip::new();
-        other.insert_group(g, tabs, section);
+        other.insert_group(taken);
         assert_eq!(other.ordered_tab_ids(), vec![ids[0], ids[1]]);
     }
 
@@ -879,6 +1138,7 @@ mod tests {
                 Item::Tab(tab.id),
             ],
             vec![Item::Group(GroupId::new())],
+            vec![],
         );
         assert_eq!(strip.ordered_tab_ids(), vec![tab.id, orphan.id]);
     }
@@ -957,5 +1217,226 @@ mod tests {
                 Placement::SectionStart(Section::Unpinned)
             );
         }
+    }
+
+    #[test]
+    fn create_split_gathers_tabs_next_to_the_first() {
+        let (mut strip, ids) = strip_with(4);
+        let split = strip
+            .create_split(&[ids[0], ids[3]], SplitOrientation::Horizontal)
+            .expect("two tabs");
+        assert_eq!(
+            strip.ordered_tab_ids(),
+            vec![ids[0], ids[3], ids[1], ids[2]]
+        );
+        assert_eq!(strip.split_of(ids[3]).map(|s| s.id), Some(split));
+        // One row for the split, none for its second tab.
+        let rows = strip.rows(None);
+        assert_eq!(rows.len(), 3);
+        assert_eq!(
+            rows[0],
+            Row::Split {
+                id: split,
+                section: Section::Unpinned,
+                group: None
+            }
+        );
+        assert!(
+            strip
+                .create_split(&[ids[1]], SplitOrientation::Horizontal)
+                .is_none()
+        );
+        assert!(
+            strip
+                .create_split(&[ids[1], TabId::new()], SplitOrientation::Horizontal)
+                .is_none(),
+            "unknown tabs don't count"
+        );
+    }
+
+    #[test]
+    fn a_split_made_in_a_folder_is_saved_in_that_folder() {
+        let (mut strip, ids) = strip_with(3);
+        let folder = strip.create_group("Research", AccentColor::Ocean, &[ids[0]]);
+        strip.create_split(&[ids[0], ids[2]], SplitOrientation::Horizontal);
+        assert_eq!(
+            strip.group(folder).map(|g| g.tabs.clone()),
+            Some(vec![ids[0], ids[2]])
+        );
+        assert!(
+            strip.is_saved(ids[2]),
+            "the joined tab is kept like the folder's tabs"
+        );
+
+        // Collapsed, the folder still shows the split of the active tab.
+        strip.set_group_collapsed(folder, true);
+        let rows = strip.rows(Some(ids[2]));
+        assert!(
+            rows.iter()
+                .any(|r| matches!(r, Row::Split { group: Some(g), .. } if *g == folder))
+        );
+        assert_eq!(strip.rows(None).len(), 2, "folder header and the other tab");
+    }
+
+    #[test]
+    fn moving_one_pane_moves_the_whole_split() {
+        let (mut strip, ids) = strip_with(4);
+        strip.create_split(&[ids[1], ids[2]], SplitOrientation::Horizontal);
+        assert!(strip.move_tab(ids[2], Placement::SectionStart(Section::Unpinned)));
+        assert_eq!(
+            strip.ordered_tab_ids(),
+            vec![ids[1], ids[2], ids[0], ids[3]]
+        );
+
+        // Into a folder, together.
+        let folder = strip.create_group("F", AccentColor::Rose, &[ids[3]]);
+        assert!(strip.move_tab(ids[1], Placement::InGroup(folder, Some(0))));
+        assert_eq!(
+            strip.group(folder).map(|g| g.tabs.clone()),
+            Some(vec![ids[1], ids[2], ids[3]])
+        );
+        // Pinning one pane pins the split.
+        assert!(strip.pin(ids[2]));
+        assert!(strip.is_pinned(ids[1]) && strip.is_pinned(ids[2]));
+        // Moving relative to its own pane does nothing.
+        assert!(!strip.move_tab(ids[1], Placement::AfterTab(ids[2])));
+    }
+
+    #[test]
+    fn tabs_never_land_inside_a_split() {
+        let (mut strip, ids) = strip_with(3);
+        strip.create_split(&[ids[0], ids[1]], SplitOrientation::Horizontal);
+        let between = strip.insert(Tab::default(), Placement::AfterTab(ids[0]));
+        assert_eq!(
+            strip.ordered_tab_ids(),
+            vec![ids[0], ids[1], between, ids[2]]
+        );
+        // New tabs opened from a pane go after the split.
+        assert_eq!(
+            strip.placement_for_new_tab(Some(ids[0])),
+            Placement::AfterTab(ids[1])
+        );
+        // A folder dropped onto the second pane lands after the split.
+        let folder = strip.create_group("F", AccentColor::Sage, &[ids[2]]);
+        strip.move_group(folder, GroupPlacement::BeforeItem(Item::Tab(ids[1])));
+        let order = strip.ordered_tab_ids();
+        assert_eq!(&order[..2], &[ids[0], ids[1]]);
+    }
+
+    #[test]
+    fn closing_a_pane_dissolves_a_split_of_two() {
+        let (mut strip, ids) = strip_with(3);
+        let split = strip
+            .create_split(&[ids[0], ids[1], ids[2]], SplitOrientation::Horizontal)
+            .expect("split");
+        strip.remove(ids[1]);
+        assert_eq!(
+            strip.split(split).map(|s| s.tabs.clone()),
+            Some(vec![ids[0], ids[2]])
+        );
+        strip.remove(ids[2]);
+        assert!(strip.split(split).is_none());
+        assert!(strip.split_of(ids[0]).is_none());
+    }
+
+    #[test]
+    fn remove_from_split_puts_the_tab_after_it() {
+        let (mut strip, ids) = strip_with(4);
+        let split = strip
+            .create_split(&[ids[0], ids[1], ids[2]], SplitOrientation::Horizontal)
+            .expect("split");
+        assert!(strip.remove_from_split(ids[0]));
+        assert_eq!(
+            strip.split(split).map(|s| s.tabs.clone()),
+            Some(vec![ids[1], ids[2]])
+        );
+        assert_eq!(
+            strip.ordered_tab_ids(),
+            vec![ids[1], ids[2], ids[0], ids[3]]
+        );
+        assert!(strip.remove_from_split(ids[2]));
+        assert!(strip.split(split).is_none(), "one tab left is no split");
+        assert!(!strip.remove_from_split(ids[3]));
+    }
+
+    #[test]
+    fn a_tab_joins_only_one_split() {
+        let (mut strip, ids) = strip_with(4);
+        let first = strip
+            .create_split(&[ids[0], ids[1]], SplitOrientation::Horizontal)
+            .expect("split");
+        let second = strip
+            .create_split(&[ids[1], ids[2]], SplitOrientation::Vertical)
+            .expect("split");
+        assert!(
+            strip.split(first).is_none(),
+            "the first split lost a pane and dissolved"
+        );
+        assert!(strip.add_to_split(second, ids[3], 1));
+        assert_eq!(
+            strip.split(second).map(|s| s.tabs.clone()),
+            Some(vec![ids[1], ids[3], ids[2]])
+        );
+        assert_eq!(&strip.ordered_tab_ids()[1..4], &[ids[1], ids[3], ids[2]]);
+        assert!(!strip.add_to_split(second, ids[3], 9), "already a pane");
+    }
+
+    #[test]
+    fn split_resize_flip_and_dissolve() {
+        let (mut strip, ids) = strip_with(2);
+        let split = strip
+            .create_split(&ids, SplitOrientation::Horizontal)
+            .expect("split");
+        assert!(strip.resize_split(split, 0, 0.1));
+        assert!(strip.flip_split(split));
+        assert_eq!(
+            strip.split(split).map(|s| s.orientation),
+            Some(SplitOrientation::Vertical)
+        );
+        assert!(strip.equalize_split(split));
+        assert_eq!(
+            strip.split(split).map(|s| s.sizes.clone()),
+            Some(vec![0.5, 0.5])
+        );
+        assert!(strip.dissolve_split(split));
+        assert_eq!(strip.ordered_tab_ids(), ids, "tabs stay where they were");
+    }
+
+    #[test]
+    fn splits_move_with_their_folder() {
+        let (mut strip, ids) = strip_with(3);
+        let folder = strip.create_group("F", AccentColor::Amber, &[ids[0], ids[1]]);
+        strip.create_split(&[ids[0], ids[1]], SplitOrientation::Horizontal);
+        let taken = strip.take_group(folder).expect("folder");
+        assert_eq!(taken.splits.len(), 1);
+        assert_eq!(strip.splits().count(), 0);
+        let mut other = TabStrip::new();
+        other.insert_group(taken);
+        assert!(other.split_of(ids[1]).is_some());
+    }
+
+    #[test]
+    fn from_parts_repairs_splits() {
+        let tabs: Vec<Tab> = (0..3)
+            .map(|i| Tab::new(format!("https://{i}.test")))
+            .collect();
+        let ids: Vec<TabId> = tabs.iter().map(|t| t.id).collect();
+        let good = TabSplit::new(&[ids[0], ids[2]], SplitOrientation::Horizontal);
+        let dangling = TabSplit::new(&[ids[1], TabId::new()], SplitOrientation::Horizontal);
+        let strip = TabStrip::from_parts(
+            tabs,
+            vec![],
+            vec![],
+            ids.iter().copied().map(Item::Tab).collect(),
+            vec![good.clone(), dangling],
+        );
+        assert_eq!(strip.splits().count(), 1);
+        assert_eq!(strip.ordered_tab_ids(), vec![ids[0], ids[2], ids[1]]);
+        let json = serde_json::to_string(&strip).expect("serialize");
+        let back: TabStrip = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(
+            back.split(good.id).map(|s| s.tabs.clone()),
+            Some(vec![ids[0], ids[2]])
+        );
     }
 }
