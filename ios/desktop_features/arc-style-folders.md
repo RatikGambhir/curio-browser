@@ -44,6 +44,9 @@ Everything is saved with the session.
     URL resets to `home_url`, scroll resets, and it stays in the folder.
   - The tab context menu shows **Unload Tab** for saved tabs, plus a new
     **Delete Tab** that really closes it (it goes to Archived Tabs).
+  - The sidebar row shows **−** while a saved tab has a live page. Tapping
+    it unloads the page. Once the tab is unloaded, the row shows **×** to
+    archive the tab. Reopening the page restores **−**.
   - ⌘W on a pinned tab now unloads too (before it closed it), matching the
     context menu.
 - **New tabs open outside folders** (`TabStrip::placement_for_new_tab`):
@@ -68,6 +71,8 @@ Everything is saved with the session.
       moved out of all folders and the pinned section lose `home_url`.
 - [ ] Close on a pinned or folder tab unloads and resets it to `home_url`.
 - [ ] Delete Tab on a saved tab closes it into Archived Tabs.
+- [ ] A saved tab's sidebar button changes from **−** to **×** after unloading,
+      and **×** removes the row and puts the tab in Archived Tabs.
 - [ ] Empty folders survive restarts; name, color, collapsed state and tab
       order survive restarts.
 

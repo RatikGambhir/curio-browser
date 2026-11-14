@@ -209,6 +209,7 @@ impl BrowserWindow {
                     SharedString::from(format!("fav-{fav_id}")),
                     Favicon::new(title.clone())
                         .url(favorite.tab.favicon_url.as_deref())
+                        .page_url(&favorite.tab.url)
                         .size(px(18.)),
                 )
                 .filled(true)
@@ -436,8 +437,13 @@ impl BrowserWindow {
             return div().into_any_element();
         };
         let (active, pinned) = (tab.active, tab.pinned);
-        // Pinned tabs and tabs in folders are kept when "closed".
         let saved = pinned || group.is_some();
+        let unload = saved && !tab.asleep;
+        let close_label = match (saved, unload) {
+            (_, true) => "Unload Tab",
+            (true, false) => "Archive Tab",
+            (false, false) => "Close Tab",
+        };
         let menu = menu.clone();
         ListItem::new(SharedString::from(format!("tab-{id}")))
             .group("tab-row")
@@ -451,6 +457,7 @@ impl BrowserWindow {
                     .child(
                         Favicon::new(tab.title.clone())
                             .url(tab.favicon.as_deref())
+                            .page_url(&tab.url)
                             .loading(tab.loading),
                     ),
             )
@@ -459,16 +466,20 @@ impl BrowserWindow {
             .child(
                 IconButton::new(
                     SharedString::from(format!("close-{id}")),
-                    if saved { IconName::Minus } else { IconName::X },
+                    if unload { IconName::Minus } else { IconName::X },
                 )
                 .xsmall()
                 .reveal_on_hover("tab-row")
                 .force_visible(active)
                 .text_color(theme.text_faint)
-                .tooltip(if saved { "Unload Tab" } else { "Close Tab" })
+                .tooltip(close_label)
                 .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                     cx.stop_propagation();
-                    this.close_or_unload_tab(id, window, cx);
+                    if unload {
+                        this.unload_tab(id, window, cx);
+                    } else {
+                        this.close_tab(id, window, cx);
+                    }
                 })),
             )
             .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
@@ -556,6 +567,7 @@ impl BrowserWindow {
                             .child(
                                 Favicon::new(tab.title.clone())
                                     .url(tab.favicon.as_deref())
+                                    .page_url(&tab.url)
                                     .loading(tab.loading),
                             ),
                     )

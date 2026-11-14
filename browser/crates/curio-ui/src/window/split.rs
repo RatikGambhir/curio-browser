@@ -389,10 +389,10 @@ impl BrowserWindow {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = *CurioTheme::get(cx);
-        let (title, favicon) = self
+        let (title, favicon, url) = self
             .workspace
             .tab(tab)
-            .map(|t| (t.display_title(), t.favicon_url.clone()))
+            .map(|t| (t.display_title(), t.favicon_url.as_deref(), t.url.as_str()))
             .unwrap_or_default();
         let saved = self.workspace.active_space().strip.is_saved(tab);
         h_flex()
@@ -415,7 +415,7 @@ impl BrowserWindow {
                         .w((metrics::TRAFFIC_LIGHTS_WIDTH - px(16.)) * (1.0 - self.left_reveal)),
                 )
             })
-            .child(Favicon::new(title.clone()).url(favicon.as_deref()))
+            .child(Favicon::new(title.clone()).url(favicon).page_url(url))
             .child(
                 div()
                     .flex_1()

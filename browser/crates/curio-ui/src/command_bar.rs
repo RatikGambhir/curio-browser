@@ -62,7 +62,11 @@ pub struct TabSuggestion {
 #[derive(Debug, Clone)]
 enum ItemIcon {
     Icon(IconName),
-    Site(Option<String>, String),
+    Site {
+        label: String,
+        favicon: Option<String>,
+        page_url: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -342,7 +346,11 @@ impl CommandBar {
             seen_urls.insert(tab.url.clone());
             items.push(Item {
                 key: SharedString::from(format!("tab:{}", tab.id)),
-                icon: ItemIcon::Site(tab.favicon.clone(), tab.title.clone()),
+                icon: ItemIcon::Site {
+                    label: tab.title.clone(),
+                    favicon: tab.favicon.clone(),
+                    page_url: Some(tab.url.clone()),
+                },
                 title: SharedString::from(if tab.title.is_empty() {
                     display_host(&tab.url)
                 } else {
@@ -379,7 +387,11 @@ impl CommandBar {
             }
             items.push(Item {
                 key: SharedString::from(format!("bm:{}", bookmark.url)),
-                icon: ItemIcon::Site(None, display_host(&bookmark.url)),
+                icon: ItemIcon::Site {
+                    label: display_host(&bookmark.url),
+                    favicon: None,
+                    page_url: None,
+                },
                 title: SharedString::from(if bookmark.title.is_empty() {
                     display_host(&bookmark.url)
                 } else {
@@ -403,7 +415,11 @@ impl CommandBar {
         {
             items.push(Item {
                 key: SharedString::from(format!("hist:{}", entry.url)),
-                icon: ItemIcon::Site(None, display_host(&entry.url)),
+                icon: ItemIcon::Site {
+                    label: display_host(&entry.url),
+                    favicon: None,
+                    page_url: Some(entry.url.clone()),
+                },
                 title: SharedString::from(if entry.title.is_empty() {
                     display_host(&entry.url)
                 } else {
@@ -499,14 +515,19 @@ impl CommandBar {
                 })
                 .child(Icon::new(*icon).small())
                 .into_any_element(),
-            ItemIcon::Site(url, label) => div()
+            ItemIcon::Site {
+                label,
+                favicon,
+                page_url,
+            } => div()
                 .size(px(26.))
                 .flex()
                 .items_center()
                 .justify_center()
                 .child(
                     Favicon::new(label.clone())
-                        .url(url.as_deref())
+                        .url(favicon.as_deref())
+                        .page_url(page_url.as_deref().unwrap_or_default())
                         .size(px(18.)),
                 )
                 .into_any_element(),

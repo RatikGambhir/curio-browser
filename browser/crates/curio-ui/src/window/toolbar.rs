@@ -335,19 +335,28 @@ impl BrowserWindow {
                     .unwrap_or_default(),
             })
             .filter_map(|id| space.strip.tab(id));
-        let compact: Vec<(TabId, Option<String>, String)> = self
+        let compact: Vec<_> = self
             .workspace
             .favorites()
             .iter()
             .map(|f| &f.tab)
             .chain(pinned_tabs)
-            .map(|t| (t.id, t.favicon_url.clone(), t.display_title()))
+            .map(|t| {
+                (
+                    t.id,
+                    t.favicon_url.clone(),
+                    t.display_title(),
+                    t.url.clone(),
+                )
+            })
             .collect();
-        for (id, icon, title) in compact {
+        for (id, icon, title, url) in compact {
             children.push(
                 IconTile::new(
                     SharedString::from(format!("hpin-{id}")),
-                    Favicon::new(title.clone()).url(icon.as_deref()),
+                    Favicon::new(title.clone())
+                        .url(icon.as_deref())
+                        .page_url(&url),
                 )
                 .selected(Some(id) == active)
                 .tooltip_text(title)
@@ -506,6 +515,7 @@ impl BrowserWindow {
             .child(
                 Favicon::new(tab.title.clone())
                     .url(tab.favicon.as_deref())
+                    .page_url(&tab.url)
                     .size(px(15.))
                     .loading(tab.loading),
             )

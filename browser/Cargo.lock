@@ -1460,12 +1460,14 @@ dependencies = [
  "curio-spaces",
  "curio-storage",
  "curio-tabs",
+ "futures-lite",
  "gpui-kit",
  "image",
  "lb-wry",
  "serde_json",
  "tempfile",
  "tracing",
+ "url",
 ]
 
 [[package]]

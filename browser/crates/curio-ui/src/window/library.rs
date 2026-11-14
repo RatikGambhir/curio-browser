@@ -701,7 +701,11 @@ impl BrowserWindow {
                     let id = tab.id;
                     let title = tab.display_title();
                     ListItem::new(SharedString::from(format!("library-tab-{id}")))
-                        .leading(Favicon::new(title.clone()).url(tab.favicon_url.as_deref()))
+                        .leading(
+                            Favicon::new(title.clone())
+                                .url(tab.favicon_url.as_deref())
+                                .page_url(&tab.url),
+                        )
                         .title(title)
                         .subtitle(display_host(&tab.url))
                         .on_click(cx.listener(move |this, _, window, cx| {
@@ -770,7 +774,11 @@ impl BrowserWindow {
                 let host = display_host(&closed.tab.url);
                 let target = space.unwrap_or_else(|| self.workspace.active_space());
                 ListItem::new(SharedString::from(format!("archived-{id}")))
-                    .leading(Favicon::new(title.clone()).url(closed.tab.favicon_url.as_deref()))
+                    .leading(
+                        Favicon::new(title.clone())
+                            .url(closed.tab.favicon_url.as_deref())
+                            .page_url(&closed.tab.url),
+                    )
                     .title(title)
                     .subtitle(match space {
                         Some(space) => format!("{host} · {}", space.name),

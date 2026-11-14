@@ -758,6 +758,7 @@ impl AiPanel {
                                     .child(
                                         Favicon::new(display_host(&c.url))
                                             .url(c.favicon_url.as_deref())
+                                            .page_url(&c.url)
                                             .size(px(12.)),
                                     )
                                     .child(
@@ -931,6 +932,7 @@ impl AiPanel {
                         SharedString::from(format!("ctx-{id}")),
                         Favicon::new(tab.title.clone())
                             .url(tab.favicon.as_deref())
+                            .page_url(&tab.url)
                             .size(px(12.))
                             .into_any_element(),
                         SharedString::from(if tab.title.is_empty() {

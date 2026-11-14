@@ -240,7 +240,12 @@ impl BrowserWindow {
                             .flex()
                             .items_center()
                             .justify_center()
-                            .child(Favicon::new(host).url(icon.as_deref()).size(px(24.))),
+                            .child(
+                                Favicon::new(host)
+                                    .url(icon.as_deref())
+                                    .page_url(&url)
+                                    .size(px(24.)),
+                            ),
                     )
                     .child(
                         div()
