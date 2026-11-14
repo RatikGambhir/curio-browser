@@ -174,8 +174,8 @@ impl BrowserWindow {
             self.open_url_in_new_tab(url, None, true, window, cx);
             return;
         };
+        self.workspace.set_tab_url(id, url);
         if let Some(tab) = self.workspace.tab_mut(id) {
-            tab.url = url.to_owned();
             tab.title.clear();
             tab.favicon_url = None;
             tab.scroll_y = 0.0;
@@ -369,13 +369,10 @@ impl BrowserWindow {
                     return;
                 };
                 let state = entity.read(cx).state().clone();
-                let mut changed = false;
+                let mut changed =
+                    !state.url.is_empty() && self.workspace.set_tab_url(id, &state.url);
                 let mut title_changed = None;
                 if let Some(tab) = self.workspace.tab_mut(id) {
-                    if !state.url.is_empty() && tab.url != state.url {
-                        tab.url.clone_from(&state.url);
-                        changed = true;
-                    }
                     if !state.title.is_empty() && tab.title != state.title {
                         tab.title.clone_from(&state.title);
                         changed = true;

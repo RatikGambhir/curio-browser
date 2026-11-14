@@ -473,14 +473,17 @@ impl BrowserWindow {
                 .force_visible(active)
                 .text_color(theme.text_faint)
                 .tooltip(close_label)
-                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                    cx.stop_propagation();
-                    if unload {
-                        this.unload_tab(id, window, cx);
-                    } else {
-                        this.close_tab(id, window, cx);
-                    }
-                })),
+                .on_click(cx.listener(
+                    move |this, event: &ClickEvent, window, cx| {
+                        cx.stop_propagation();
+                        if unload {
+                            this.unload_tab(id, window, cx);
+                        } else if !saved || event.click_count() == 1 {
+                            // A second click on Unload can land on Archive after the row updates.
+                            this.close_tab(id, window, cx);
+                        }
+                    },
+                )),
             )
             .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
                 if event.modifiers().secondary(cx) {

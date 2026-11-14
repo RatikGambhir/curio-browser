@@ -314,6 +314,18 @@ impl Workspace {
         self.spaces.iter_mut().find_map(|s| s.strip.tab_mut(id))
     }
 
+    /// Updates a tab's current URL, returning whether it changed.
+    pub fn set_tab_url(&mut self, id: TabId, url: &str) -> bool {
+        if let Some(fav) = self.favorites.iter_mut().find(|f| f.tab.id == id) {
+            if fav.tab.url == url {
+                return false;
+            }
+            url.clone_into(&mut fav.tab.url);
+            return true;
+        }
+        self.spaces.iter_mut().any(|s| s.strip.set_tab_url(id, url))
+    }
+
     /// The space that owns a tab, if it is not a favorite.
     #[must_use]
     pub fn space_of_tab(&self, id: TabId) -> Option<SpaceId> {

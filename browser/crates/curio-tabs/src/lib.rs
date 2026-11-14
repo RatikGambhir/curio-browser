@@ -13,7 +13,9 @@
 
 use std::collections::{HashMap, HashSet};
 
-use curio_core::{AccentColor, GroupId, SplitId, SplitOrientation, Tab, TabGroup, TabId, TabSplit};
+use curio_core::{
+    AccentColor, GroupId, NEW_TAB_URL, SplitId, SplitOrientation, Tab, TabGroup, TabId, TabSplit,
+};
 use serde::{Deserialize, Serialize};
 
 /// One of the two sidebar sections of a space.
@@ -195,6 +197,15 @@ impl TabStrip {
             .unpinned
             .extend(unreferenced.into_iter().map(Item::Group));
         strip.repair_splits();
+        // Older sessions may have saved the placeholder as a tab's home.
+        let blank_homes: Vec<_> = strip
+            .tabs()
+            .filter(|tab| tab.home_url.as_deref() == Some(NEW_TAB_URL))
+            .map(|tab| tab.id)
+            .collect();
+        for id in blank_homes {
+            strip.sync_home(id);
+        }
         strip
     }
 
@@ -219,6 +230,21 @@ impl TabStrip {
     /// Looks up a tab for mutation.
     pub fn tab_mut(&mut self, id: TabId) -> Option<&mut Tab> {
         self.tabs.get_mut(&id)
+    }
+
+    /// Updates the current URL and records the first page of a saved blank tab.
+    pub fn set_tab_url(&mut self, id: TabId, url: &str) -> bool {
+        let Some(tab) = self.tabs.get_mut(&id) else {
+            return false;
+        };
+        if tab.url == url {
+            return false;
+        }
+        url.clone_into(&mut tab.url);
+        if tab.home_url.is_none() {
+            self.sync_home(id);
+        }
+        true
     }
 
     /// Returns `true` if the strip owns `id`.
@@ -340,14 +366,15 @@ impl TabStrip {
             .is_some_and(|loc| loc.section == Section::Pinned || loc.group.is_some())
     }
 
-    /// Saved tabs remember the URL they were saved with as their home; a
-    /// tab that leaves the pinned section and every folder forgets it.
+    /// Saved tabs remember their first page, skipping the new tab placeholder.
+    /// A tab that leaves the pinned section and every folder forgets its home.
     fn sync_home(&mut self, id: TabId) {
         let saved = self.is_saved(id);
         if let Some(tab) = self.tabs.get_mut(&id) {
-            if !saved {
+            if !saved || tab.home_url.as_deref() == Some(NEW_TAB_URL) {
                 tab.home_url = None;
-            } else if tab.home_url.is_none() {
+            }
+            if saved && tab.home_url.is_none() && !tab.is_new_tab_page() && !tab.url.is_empty() {
                 tab.home_url = Some(tab.url.clone());
             }
         }
@@ -492,7 +519,10 @@ impl TabStrip {
         if self.is_pinned(id) {
             return false;
         }
-        if let Some(tab) = self.tabs.get_mut(&id) {
+        if let Some(tab) = self.tabs.get_mut(&id)
+            && !tab.is_new_tab_page()
+            && !tab.url.is_empty()
+        {
             tab.home_url = Some(tab.url.clone());
         }
         self.move_tab(id, Placement::SectionEnd(Section::Pinned))
@@ -1172,6 +1202,75 @@ mod tests {
         assert!(strip.move_tab(ids[1], Placement::SectionEnd(Section::Unpinned)));
         assert!(!strip.is_saved(ids[1]));
         assert!(strip.tab(ids[1]).is_some_and(|t| t.home_url.is_none()));
+    }
+
+    #[test]
+    fn saved_blank_tabs_use_the_first_page_as_home() {
+        let (mut strip, ids) = strip_with(2);
+        let folder = strip.create_group("Reading", AccentColor::Ocean, &[ids[0]]);
+        strip.pin(ids[1]);
+        let pinned_pane = strip.insert(Tab::default(), Placement::AfterTab(ids[1]));
+        assert!(
+            strip
+                .create_split(&[ids[1], pinned_pane], SplitOrientation::Horizontal)
+                .is_some()
+        );
+        let folder_pane = strip.insert(Tab::default(), Placement::AfterTab(ids[0]));
+        assert!(
+            strip
+                .create_split(&[ids[0], folder_pane], SplitOrientation::Horizontal)
+                .is_some()
+        );
+        let dragged = strip.insert(Tab::default(), Placement::SectionEnd(Section::Unpinned));
+        let pinned = strip.insert(Tab::default(), Placement::SectionEnd(Section::Unpinned));
+        assert!(strip.move_tab(dragged, Placement::InGroup(folder, None)));
+        assert!(strip.pin(pinned));
+
+        for id in [pinned_pane, folder_pane, dragged, pinned] {
+            assert!(strip.is_saved(id));
+            assert!(strip.tab(id).is_some_and(|tab| tab.home_url.is_none()));
+            assert!(strip.set_tab_url(id, "https://first.test"));
+            assert!(strip.set_tab_url(id, "https://second.test"));
+            assert!(strip.set_tab_url(id, NEW_TAB_URL));
+            assert_eq!(
+                strip.tab(id).and_then(|tab| tab.home_url.as_deref()),
+                Some("https://first.test")
+            );
+        }
+    }
+
+    #[test]
+    fn restoring_a_blank_home_uses_the_current_page_if_available() {
+        let mut navigated = Tab::new("https://current.test");
+        navigated.home_url = Some(NEW_TAB_URL.to_owned());
+        let blank = Tab {
+            home_url: Some(NEW_TAB_URL.to_owned()),
+            ..Tab::default()
+        };
+        let (navigated_id, blank_id) = (navigated.id, blank.id);
+        let mut strip = TabStrip::from_parts(
+            vec![navigated, blank],
+            vec![],
+            vec![Item::Tab(navigated_id), Item::Tab(blank_id)],
+            vec![],
+            vec![],
+        );
+        assert_eq!(
+            strip
+                .tab(navigated_id)
+                .and_then(|tab| tab.home_url.as_deref()),
+            Some("https://current.test")
+        );
+        assert!(
+            strip
+                .tab(blank_id)
+                .is_some_and(|tab| tab.home_url.is_none())
+        );
+        assert!(strip.set_tab_url(blank_id, "https://first.test"));
+        assert_eq!(
+            strip.tab(blank_id).and_then(|tab| tab.home_url.as_deref()),
+            Some("https://first.test")
+        );
     }
 
     #[test]
