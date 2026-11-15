@@ -17,6 +17,8 @@ final class BrowserSession {
     /// The room the page area has for split views; set by the browser
     /// screen as its layout changes.
     private(set) var splitRoom: SplitRoom = .none
+    /// The last close-button unload, so a double tap doesn't also archive.
+    private var lastUnload: (id: UUID, time: ContinuousClock.Instant)?
 
     init(services: AppServices) {
         self.services = services
@@ -147,6 +149,11 @@ final class BrowserSession {
         for id in visible {
             if let live = ensureLiveTab(id), !live.isActive { live.setActive(true) }
         }
+        // Only unfocused panes report presses in their page (to take the focus).
+        let active = workspace.activeTabID
+        for (id, live) in liveTabs {
+            live.setReportsFocus(visible.count > 1 && id != active && visible.contains(id))
+        }
         delegate?.session(self, didChange: .activeTab)
         delegate?.session(self, didChange: .tabs)
     }
@@ -273,7 +280,17 @@ final class BrowserSession {
     /// A tab row's close button: unloads a saved tab whose page is live, and
     /// otherwise closes the tab into Archived Tabs.
     func unloadOrArchiveTab(_ id: UUID) {
-        if isSaved(id) && liveTabs[id]?.isAwake == true { unloadTab(id) } else { closeTab(id) }
+        let now = ContinuousClock.now
+        if isSaved(id) && liveTabs[id]?.isAwake == true {
+            lastUnload = (id, now)
+            unloadTab(id)
+        } else if isSaved(id), let last = lastUnload, last.id == id, now - last.time < .milliseconds(500) {
+            // The second tap of a double tap on − lands on the × that replaced
+            // it; archiving the tab would be a surprise.
+            return
+        } else {
+            closeTab(id)
+        }
     }
 
     func closeActiveTab() {
@@ -535,10 +552,7 @@ final class BrowserSession {
             return .refused
         }
         let existing = strip.split(of: active)
-        if existing?.isFull == true {
-            delegate?.session(self, showToast: Self.splitFullMessage, title: nil, kind: .info)
-            return .refused
-        }
+        guard canGrowSplit(existing) else { return .refused }
         let pane = Tab()
         workspace.updateSpace(spaceID) { space in
             space.strip.insert(pane, at: .afterTab(active))
@@ -552,39 +566,72 @@ final class BrowserSession {
         return .added
     }
 
+    /// Whether `split` (or a new split, for `nil`) can take one more pane:
+    /// under the pane limit and with room for every pane in its orientation.
+    /// Shows why when it can't.
+    private func canGrowSplit(_ split: TabSplit?) -> Bool {
+        let panes = (split?.tabs.count ?? 1) + 1
+        if panes > TabSplit.maxPanes {
+            delegate?.session(self, showToast: Self.splitFullMessage, title: nil, kind: .info)
+            return false
+        }
+        guard splitRoom.fits(panes: panes, orientation: split?.orientation ?? .horizontal) else {
+            delegate?.session(self, showToast: Self.splitRoomMessage, title: nil, kind: .info)
+            return false
+        }
+        return true
+    }
+
+    static let splitRoomMessage = "There isn’t room for another pane here"
+
+    /// Drops a pane that Split View added if its page was never chosen (it
+    /// still shows the new tab page). It doesn't go to Archived Tabs.
+    func discardBlankPane(_ id: UUID) {
+        guard workspace.tab(id)?.isNewTabPage == true, workspace.closeTab(id, remember: false) != nil else { return }
+        releaseTab(id)
+        syncActiveTab()
+        scheduleSave()
+    }
+
     /// Shows `tab` beside the active tab: before or after it, in a new split
-    /// or as another pane of the active tab's split. The split stays where
-    /// the active tab is (its space and folder), and `tab` takes the focus.
+    /// or as another pane of the active tab's split, and `tab` takes the
+    /// focus. The split stays where the active tab is (its space and
+    /// folder), except that a pinned or folder tab is never turned into a
+    /// regular tab: when only `tab` is saved, the split moves to it instead.
     func splitWith(_ tab: UUID, before: Bool) {
         guard let active = activeTabID, active != tab else { return }
-        guard let spaceID = workspace.spaceOfTab(active), splitAvailable else {
+        guard let spaceID = workspace.spaceOfTab(active), splitAvailable,
+              let strip = workspace.space(spaceID)?.strip else {
             // The active tab is a favorite: just show the tab.
             activateTab(tab)
             return
         }
-        switch workspace.spaceOfTab(tab) {
-        case nil:
+        guard let tabSpace = workspace.spaceOfTab(tab) else {
             delegate?.session(self, showToast: Self.splitFavoriteMessage, title: nil, kind: .info)
             return
-        case .some(let other) where other != spaceID:
-            workspace.moveTab(tab, toSpace: spaceID)
-        default:
-            break
         }
-        guard let strip = workspace.space(spaceID)?.strip else { return }
-        if let split = strip.split(of: active), !split.contains(tab) {
-            guard !split.isFull else {
-                delegate?.session(self, showToast: Self.splitFullMessage, title: nil, kind: .info)
-                return
-            }
-            let index = (split.tabs.firstIndex(of: active) ?? 0) + (before ? 0 : 1)
-            workspace.updateSpace(spaceID) { $0.strip.addToSplit(split.id, tab: tab, at: index) }
-        } else if strip.split(of: active) == nil {
-            // Out of any other split, then right beside the active tab so the
-            // new split forms where the active tab is.
-            workspace.updateSpace(spaceID) { space in
-                space.strip.removeFromSplit(tab)
-                space.strip.move(tab, to: before ? .beforeTab(active) : .afterTab(active))
+        let existing = strip.split(of: active)
+        if existing?.contains(tab) == true {
+            activateTab(tab)
+            return
+        }
+        // Check before changing anything, so a refusal leaves every tab put.
+        guard canGrowSplit(existing) else { return }
+        if tabSpace != spaceID { workspace.moveTab(tab, toSpace: spaceID) }
+        workspace.updateSpace(spaceID) { space in
+            space.strip.removeFromSplit(tab)
+            let toTab = space.strip.isSaved(tab) && !space.strip.isSaved(active)
+            if let existing {
+                // Moving any pane moves the whole split.
+                if toTab { space.strip.move(active, to: .afterTab(tab)) }
+                let index = (existing.tabs.firstIndex(of: active) ?? 0) + (before ? 0 : 1)
+                space.strip.addToSplit(existing.id, tab: tab, at: index)
+            } else {
+                if toTab {
+                    space.strip.move(active, to: before ? .afterTab(tab) : .beforeTab(tab))
+                } else {
+                    space.strip.move(tab, to: before ? .beforeTab(active) : .afterTab(active))
+                }
                 space.strip.createSplit(before ? [tab, active] : [active, tab])
             }
         }

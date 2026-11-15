@@ -87,7 +87,12 @@ extension BrowserViewController {
             if let active, let group = session.newGroup(with: [active]) { beginFolderRename(group) }
         case .splitView:
             switch session.splitView() {
-            case .added, .noActiveTab: openCommandBar(.newTab)
+            case .added:
+                guard let pane = session.activeTabID else { break }
+                openCommandBar(.newTab)
+                // Without a bar to choose its page, the blank pane goes again.
+                if commandBar != nil { pendingSplitPane = pane } else { session.discardBlankPane(pane) }
+            case .noActiveTab: openCommandBar(.newTab)
             case .refused: break
             }
         case .separateSplitView: session.separateSplitView()
@@ -200,8 +205,11 @@ extension BrowserViewController {
         let bar = CommandBarViewController(session: session, mode: mode, text: text, compact: isCompact)
         bar.onDismiss = { [weak self] in self?.closeCommandBar() }
         bar.onExecute = { [weak self] target in
-            self?.closeCommandBar()
-            self?.execute(target)
+            guard let self else { return }
+            let splitPane = pendingSplitPane
+            pendingSplitPane = nil
+            closeCommandBar()
+            execute(target, splitPane: splitPane)
         }
         let host: UIViewController = presentedAssistantSheet == nil ? self : (presentedAssistantSheet ?? self)
         if host !== self { dismissAssistantSheet() }
@@ -224,6 +232,11 @@ extension BrowserViewController {
     func closeCommandBar() {
         guard let bar = commandBar else { return }
         commandBar = nil
+        if let pane = pendingSplitPane {
+            // Dismissed without choosing the new pane's page.
+            pendingSplitPane = nil
+            session.discardBlankPane(pane)
+        }
         bar.view.endEditing(true)
         bar.willMove(toParent: nil)
         bar.view.removeFromSuperview()
@@ -231,10 +244,17 @@ extension BrowserViewController {
         page.suppressSelection = false
     }
 
-    private func execute(_ target: CommandTarget) {
+    /// Runs a command bar choice. `splitPane` is the blank pane Split View
+    /// added: a page opens in it, an existing tab takes its place in the
+    /// split, and anything else drops it.
+    private func execute(_ target: CommandTarget, splitPane: UUID? = nil) {
+        if let splitPane {
+            if case .navigate = target {} else { session.discardBlankPane(splitPane) }
+        }
         switch target {
         case .navigate(let url, let newTab): session.open(url, newTab: newTab)
-        case .switchTab(let id): session.activateTab(id)
+        case .switchTab(let id):
+            if splitPane != nil { session.splitWith(id, before: false) } else { session.activateTab(id) }
         case .command(let command): perform(command)
         case .askAI(let question):
             showAssistant(focus: false)

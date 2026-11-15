@@ -49,10 +49,13 @@ nonisolated struct TabStrip: Equatable, Sendable {
             return nil
         })
         self.unpinned.append(contentsOf: groups.keys.filter { !referenced.contains($0) }.map(TabItem.group))
-        // Older sessions may have saved the new tab page as a tab's home.
-        for tab in tabs.values where tab.homeURL == Curio.newTabURL {
-            syncHome(tab.id)
-        }
+        // Every saved tab (pinned or in a folder) has a home. Older sessions
+        // saved folder tabs without one and could save the new tab page as
+        // one; those take their current page.
+        var saved = Set<UUID>()
+        for case .tab(let id) in self.pinned { saved.insert(id) }
+        for group in groups.values { saved.formUnion(group.tabs) }
+        for id in tabs.keys { applyHome(id, saved: saved.contains(id)) }
         splitsByID = Dictionary(splits.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         repairSplits()
     }
@@ -150,7 +153,10 @@ nonisolated struct TabStrip: Equatable, Sendable {
     /// Saved tabs remember their first page, skipping the new tab page. A tab
     /// that leaves the pinned section and every folder forgets its home.
     private mutating func syncHome(_ id: UUID) {
-        let saved = isSaved(id)
+        applyHome(id, saved: isSaved(id))
+    }
+
+    private mutating func applyHome(_ id: UUID, saved: Bool) {
         guard var tab = tabsByID[id] else { return }
         if !saved || tab.homeURL == Curio.newTabURL { tab.homeURL = nil }
         if saved && tab.homeURL == nil && !tab.isNewTabPage && !tab.url.isEmpty { tab.homeURL = tab.url }
@@ -443,8 +449,9 @@ nonisolated struct TabStrip: Equatable, Sendable {
     /// single-page layout), every pane is listed as an ordinary tab.
     func rows(alwaysShow: UUID?, showingSplits: Bool = true) -> [TabRow] {
         var rows: [TabRow] = []
-        // The split the always-shown tab belongs to stays visible with it.
-        let alwaysSplit = alwaysShow.flatMap { split(of: $0)?.id }
+        // The split the always-shown tab belongs to stays visible with it
+        // (only where it is one row; otherwise just the tab shows).
+        let alwaysSplit = showingSplits ? alwaysShow.flatMap { split(of: $0)?.id } : nil
         func row(_ id: UUID, _ section: TabSection, _ group: UUID?) -> TabRow? {
             guard showingSplits, let split = split(of: id) else { return .tab(id: id, section: section, group: group) }
             return split.tabs.first == id ? .split(id: split.id, section: section, group: group) : nil

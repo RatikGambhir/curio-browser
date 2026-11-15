@@ -65,6 +65,8 @@ final class StripTabView: TapControl, ThemeObserving, UIDragInteractionDelegate 
         favicon.configure(label: model.title, url: model.favicon, loading: model.loading)
         accessibilityLabel = model.title
         accessibilityTraits = model.active ? [.button, .selected] : .button
+        // Saved tabs (pinned or in a folder) unload (−) while their page is live.
+        closeButton.setIcon(model.unloads ? .minus : .close, label: TabRowCell.closeLabel(model))
         restyle()
     }
 

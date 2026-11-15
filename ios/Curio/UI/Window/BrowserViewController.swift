@@ -16,6 +16,9 @@ final class BrowserViewController: UIViewController, ThemeObserving {
     let page: PageViewController
     let assistant: AssistantViewController
     var commandBar: CommandBarViewController?
+    /// The blank pane Split View added while the command bar picks its page;
+    /// dropped if the bar closes without choosing one.
+    var pendingSplitPane: UUID?
 
     // Chrome.
     let chrome = GradientView()

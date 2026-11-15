@@ -17,9 +17,6 @@ final class SidebarViewController: UIViewController, ThemeObserving {
     private var swipeTranslation: CGFloat = 0
     /// The folder whose name is being edited in its row.
     private var renamingGroup: UUID?
-    /// The last − tap, so the second tap of a double tap doesn't land on the
-    /// × that replaces it and archive the tab.
-    private var lastUnload: (id: UUID, time: CFTimeInterval)?
     /// Narrow layouts use taller rows for touch.
     var compact = false {
         didSet { if compact != oldValue { reload(animated: false, reconfigure: true) } }
@@ -296,17 +293,9 @@ final class SidebarViewController: UIViewController, ThemeObserving {
     // MARK: - Closing tabs
 
     /// − unloads a saved tab's page; × closes the tab into Archived Tabs.
+    /// The session ignores the second tap of a double tap on −.
     private func closeButtonTapped(_ model: TabViewModel) {
-        let now = CACurrentMediaTime()
-        if model.unloads {
-            lastUnload = (model.id, now)
-            session.unloadTab(model.id)
-        } else if model.saved, let last = lastUnload, last.id == model.id, now - last.time < 0.5 {
-            // The second tap of a double tap on −.
-            return
-        } else {
-            session.closeTab(model.id)
-        }
+        session.unloadOrArchiveTab(model.id)
     }
 
     /// A tap on a split row's segment focuses that pane; ⌘-tap attaches it

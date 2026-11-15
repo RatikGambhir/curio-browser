@@ -281,6 +281,41 @@ final class SplitViewTests: XCTestCase {
         XCTAssertEqual(workspace.space(a)?.activeTab, ids[1])
     }
 
+    func testMovingTheActiveSplitAwayActivatesATabOutsideIt() {
+        var (workspace, a, b, ids) = workspaceWithTabs()
+        workspace.updateSpace(a) { $0.strip.createSplit([ids[0], ids[2]]) }
+        // Order is now 0, 2, 1, and the first pane is active.
+        workspace.activateTab(ids[0])
+        XCTAssertTrue(workspace.moveTab(ids[0], toSpace: b))
+        XCTAssertEqual(workspace.space(a)?.activeTab, ids[1], "never left without an active tab")
+    }
+
+    func testCollapsedFolderShowsOnlyTheActivePaneWhenSplitsAreHidden() {
+        var (strip, ids) = strip(3)
+        let folder = strip.createGroup(name: "Docs", color: .ocean, members: ids)
+        strip.createSplit([ids[0], ids[1]])
+        strip.setGroupCollapsed(folder, true)
+        XCTAssertEqual(strip.rows(alwaysShow: ids[1], showingSplits: false), [
+            .group(id: folder, section: .unpinned),
+            .tab(id: ids[1], section: .unpinned, group: folder),
+        ])
+        let split = strip.split(of: ids[0])!.id
+        XCTAssertEqual(strip.rows(alwaysShow: ids[1], showingSplits: true), [
+            .group(id: folder, section: .unpinned),
+            .split(id: split, section: .unpinned, group: folder),
+        ])
+    }
+
+    func testOlderFolderTabsTakeTheirCurrentPageAsHome() {
+        let tab = Tab(url: "https://docs.test/start")
+        var group = TabGroup(name: "Docs", color: .ocean)
+        group.tabs = [tab.id]
+        let regular = Tab(url: "https://other.test")
+        let strip = TabStrip(tabs: [tab, regular], groups: [group], pinned: [], unpinned: [.group(group.id), .tab(regular.id)])
+        XCTAssertEqual(strip.tab(tab.id)?.homeURL, "https://docs.test/start")
+        XCTAssertNil(strip.tab(regular.id)?.homeURL)
+    }
+
     func testClosingAPaneShowsThePaneBesideIt() {
         var (workspace, a, _, ids) = workspaceWithTabs()
         workspace.updateSpace(a) { $0.strip.createSplit([ids[0], ids[2]]) }

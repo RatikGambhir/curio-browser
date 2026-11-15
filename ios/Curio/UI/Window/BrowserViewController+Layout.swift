@@ -107,7 +107,6 @@ extension BrowserViewController {
         }
 
         let changes = {
-            defer { self.updateSplitRoom() }
             self.sidebarHost.alpha = libraryVisible ? 0 : 1
             self.libraryHost.alpha = libraryVisible ? 1 : 0
             self.aiColumn.alpha = aiVisible ? 1 : 0
@@ -123,6 +122,9 @@ extension BrowserViewController {
             changes()
             aiColumn.isHidden = !aiVisible
         }
+        // The layout above already holds its final frames (the animator only
+        // animates how they look), so the page area's room is known now.
+        updateSplitRoom()
     }
 
     // MARK: - Split view room
@@ -140,7 +142,10 @@ extension BrowserViewController {
             let screen = view.window?.windowScene?.screen.bounds.size ?? .zero
             supported = min(screen.width, screen.height) >= Self.minimumSplitScreenSide
         }
-        session.setSplitRoom(SplitRoom(supported: supported, size: page.view.bounds.size))
+        let room = SplitRoom(supported: supported, size: page.view.bounds.size)
+        // Panes a split gains or loses are built at their final frames, never
+        // animated in from zero, even when this runs inside a layout animation.
+        UIView.performWithoutAnimation { session.setSplitRoom(room) }
     }
 
     /// A phone display whose shorter side reaches this is an unfolded

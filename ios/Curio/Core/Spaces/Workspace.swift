@@ -219,12 +219,14 @@ nonisolated struct Workspace: Equatable, Sendable {
     /// Closes a regular tab, remembering it for reopening. Returns the tab
     /// that became active in its space. Closing a pane of a split view shows
     /// the pane beside it (the next one, or the previous one for the last).
-    mutating func closeTab(_ id: UUID) -> (space: UUID, nextActive: UUID?)? {
+    /// With `remember` off, the tab is dropped without going to Archived Tabs.
+    mutating func closeTab(_ id: UUID, remember: Bool = true) -> (space: UUID, nextActive: UUID?)? {
         guard let spaceID = spaceOfTab(id), let index = spaceIndex(spaceID) else { return nil }
         let strip = spaces[index].strip
         let next = strip.split(of: id).flatMap { Self.paneBeside(id, in: $0) } ?? strip.neighborForClose(id)
         guard let removed = spaces[index].strip.remove(id) else { return nil }
         if spaces[index].activeTab == id { spaces[index].activeTab = next }
+        guard remember else { return (spaceID, spaces[index].activeTab) }
         closedTabs.insert(ClosedTab(space: spaceID, tab: removed.tab, restoreAt: removed.restoreAt, closedAt: .now), at: 0)
         if closedTabs.count > Self.closedTabLimit { closedTabs.removeLast(closedTabs.count - Self.closedTabLimit) }
         return (spaceID, spaces[index].activeTab)
@@ -285,6 +287,13 @@ nonisolated struct Workspace: Equatable, Sendable {
         return index > 0 ? split.tabs[index - 1] : nil
     }
 
+    /// The tab after `id` in `order` that isn't in `skipping`, or else the
+    /// one before it.
+    private static func neighbor(of id: UUID, in order: [UUID], skipping: Set<UUID>) -> UUID? {
+        guard let index = order.firstIndex(of: id) else { return nil }
+        return order[(index + 1)...].first { !skipping.contains($0) } ?? order[..<index].last { !skipping.contains($0) }
+    }
+
     /// Moves a tab to the top of another space's regular section. A tab in
     /// a split view takes the whole split with it, keeping its orientation
     /// and pane sizes.
@@ -294,17 +303,17 @@ nonisolated struct Workspace: Equatable, Sendable {
               let index = spaceIndex(source) else { return false }
         let split = spaces[index].strip.split(of: id)
         let members = split?.tabs ?? [id]
+        // When the active tab leaves, the nearest tab outside the moved split
+        // takes over: the next one, or the previous one when it was last.
+        let order = spaces[index].strip.orderedTabIDs
+        let leavingActive = spaces[index].activeTab.flatMap { members.contains($0) ? $0 : nil }
         var moved: [Tab] = []
         for member in members {
-            let next = spaces[index].strip.neighborForClose(member)
             guard let removed = spaces[index].strip.remove(member) else { continue }
-            if spaces[index].activeTab == member {
-                spaces[index].activeTab = next.flatMap { members.contains($0) ? nil : $0 }
-            }
             moved.append(removed.tab)
         }
-        if let active = spaces[index].activeTab, members.contains(active) {
-            spaces[index].activeTab = spaces[index].strip.orderedTabIDs.first
+        if let leavingActive {
+            spaces[index].activeTab = Self.neighbor(of: leavingActive, in: order, skipping: Set(members))
         }
         guard !moved.isEmpty else { return false }
         return updateSpace(target) { space in
