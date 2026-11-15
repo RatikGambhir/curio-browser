@@ -14,6 +14,7 @@ use super::{BrowserWindow, DraggedTab};
 pub(super) struct TabView {
     pub id: TabId,
     pub title: String,
+    pub url: String,
     pub favicon: Option<String>,
     pub active: bool,
     pub pinned: bool,
@@ -28,6 +29,7 @@ impl TabView {
         DraggedTab {
             id: self.id,
             title: SharedString::from(self.title.clone()),
+            url: self.url.clone(),
             favicon: self.favicon.clone(),
         }
     }
@@ -77,6 +79,7 @@ impl BrowserWindow {
         Some(TabView {
             id,
             title: tab.display_title(),
+            url: tab.url.clone(),
             favicon: tab.favicon_url.clone(),
             active: self.workspace.active_tab_id() == Some(id),
             pinned: self.workspace.active_space().strip.is_pinned(id),

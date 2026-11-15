@@ -273,9 +273,13 @@ impl BrowserWindow {
             .border_b_1()
             .border_color(theme.divider)
             .window_drag_area()
-            // Without a left column the traffic lights sit over the card.
-            .when(!self.left_column_visible(cx), |el| {
-                el.child(traffic_lights_spacer(px(16.)))
+            // Without a left column the traffic lights sit over the card;
+            // their space opens up as the sidebar slides away.
+            .when(self.left_reveal < 1.0, |el| {
+                el.child(
+                    traffic_lights_spacer(px(16.))
+                        .w((metrics::TRAFFIC_LIGHTS_WIDTH - px(16.)) * (1.0 - self.left_reveal)),
+                )
             })
             .child(
                 IconButton::new("tool-sidebar", IconName::PanelLeft)
@@ -286,6 +290,21 @@ impl BrowserWindow {
             .child(div().w(px(6.)).flex_shrink_0())
             .child(address)
             .child(div().flex_1().min_w(px(12.)))
+            // In a split view, the focused pane can leave it from here.
+            .when_some(
+                self.workspace
+                    .active_tab_id()
+                    .filter(|_| self.visible_split().is_some()),
+                |el, tab| {
+                    el.child(
+                        IconButton::new("pane-separate", IconName::Unlink)
+                            .tooltip("Remove from Split View")
+                            .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                                this.remove_tab_from_split(tab, window, cx);
+                            })),
+                    )
+                },
+            )
             .child(assistant_button(self.ai_open))
             .child(downloads_button())
             .into_any_element()
@@ -316,19 +335,28 @@ impl BrowserWindow {
                     .unwrap_or_default(),
             })
             .filter_map(|id| space.strip.tab(id));
-        let compact: Vec<(TabId, Option<String>, String)> = self
+        let compact: Vec<_> = self
             .workspace
             .favorites()
             .iter()
             .map(|f| &f.tab)
             .chain(pinned_tabs)
-            .map(|t| (t.id, t.favicon_url.clone(), t.display_title()))
+            .map(|t| {
+                (
+                    t.id,
+                    t.favicon_url.clone(),
+                    t.display_title(),
+                    t.url.clone(),
+                )
+            })
             .collect();
-        for (id, icon, title) in compact {
+        for (id, icon, title, url) in compact {
             children.push(
                 IconTile::new(
                     SharedString::from(format!("hpin-{id}")),
-                    Favicon::new(title.clone()).url(icon.as_deref()),
+                    Favicon::new(title.clone())
+                        .url(icon.as_deref())
+                        .page_url(&url),
                 )
                 .selected(Some(id) == active)
                 .tooltip_text(title)
@@ -487,6 +515,7 @@ impl BrowserWindow {
             .child(
                 Favicon::new(tab.title.clone())
                     .url(tab.favicon.as_deref())
+                    .page_url(&tab.url)
                     .size(px(15.))
                     .loading(tab.loading),
             )

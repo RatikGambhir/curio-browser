@@ -12,13 +12,16 @@ use crate::components::{DragPreview, Favicon};
 pub(crate) struct DraggedTab {
     pub id: TabId,
     pub title: SharedString,
+    pub url: String,
     pub favicon: Option<String>,
 }
 
 impl Render for DraggedTab {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         DragPreview::new(
-            Favicon::new(self.title.clone()).url(self.favicon.as_deref()),
+            Favicon::new(self.title.clone())
+                .url(self.favicon.as_deref())
+                .page_url(&self.url),
             self.title.clone(),
         )
     }

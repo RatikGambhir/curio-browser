@@ -17,9 +17,11 @@ curio-ai.workspace = true
 curio-browser.workspace = true
 gpui-kit.workspace = true
 wry.workspace = true
+futures-lite = "2"
 image.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
+url.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

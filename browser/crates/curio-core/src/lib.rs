@@ -13,9 +13,9 @@ pub mod time;
 
 pub use color::AccentColor;
 pub use gradient::{SpaceGradient, Tone};
-pub use ids::{ConversationId, FavoriteId, GroupId, MessageId, SpaceId, TabId};
+pub use ids::{ConversationId, FavoriteId, GroupId, MessageId, SpaceId, SplitId, TabId};
 pub use omnibox::{Navigation, SearchEngine, classify_input};
-pub use tab::{Favorite, Tab, TabGroup};
+pub use tab::{Favorite, SplitOrientation, Tab, TabGroup, TabSplit};
 
 /// The product name, used for window titles, menus and data directories.
 pub const APP_NAME: &str = "Curio";

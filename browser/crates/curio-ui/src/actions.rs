@@ -44,9 +44,13 @@ actions!(
         SelectTab8,
         SelectLastTab,
         NewGroupFromTab,
+        NewFolder,
         AddFavorite,
         ToggleBookmark,
         CopyUrl,
+        // Split view
+        SplitView,
+        SeparateSplitView,
         // Navigation
         GoBack,
         GoForward,
@@ -119,8 +123,11 @@ fn defaults() -> Vec<(&'static str, Box<dyn Action>)> {
         ("secondary-8", Box::new(SelectTab8)),
         ("secondary-9", Box::new(SelectLastTab)),
         ("alt-secondary-g", Box::new(NewGroupFromTab)),
+        ("alt-secondary-n", Box::new(NewFolder)),
         ("shift-secondary-d", Box::new(ToggleBookmark)),
         ("shift-secondary-c", Box::new(CopyUrl)),
+        ("ctrl-shift-=", Box::new(SplitView)),
+        ("ctrl-shift--", Box::new(SeparateSplitView)),
         ("secondary-[", Box::new(GoBack)),
         ("secondary-]", Box::new(GoForward)),
         ("secondary-r", Box::new(Reload)),
@@ -364,7 +371,11 @@ pub fn menus() -> Vec<Menu> {
             MenuItem::action("Duplicate Tab", DuplicateTab),
             MenuItem::action("Add to Favorites", AddFavorite),
             MenuItem::action("Bookmark Page", ToggleBookmark),
-            MenuItem::action("New Group from Tab", NewGroupFromTab),
+            MenuItem::action("New Folder", NewFolder),
+            MenuItem::action("New Folder from Tab", NewGroupFromTab),
+            MenuItem::separator(),
+            MenuItem::action("Split View", SplitView),
+            MenuItem::action("Separate Split View", SeparateSplitView),
             MenuItem::separator(),
             MenuItem::action("Next Tab", NextTab),
             MenuItem::action("Previous Tab", PreviousTab),
@@ -416,6 +427,10 @@ mod tests {
         );
         assert_eq!(bridge_keystroke("escape"), None);
         assert_eq!(bridge_keystroke("ctrl-tab").as_deref(), Some("ctrl-tab"));
+        assert_eq!(
+            bridge_keystroke("ctrl-shift--").as_deref(),
+            Some("ctrl-shift--")
+        );
     }
 
     #[test]

@@ -9,7 +9,7 @@ use curio_core::chat::{
 use curio_core::time::{Timestamp, now_ms};
 use curio_core::{
     AccentColor, ConversationId, Favorite, FavoriteId, GroupId, SpaceGradient, SpaceId, Tab,
-    TabGroup, TabId,
+    TabGroup, TabId, TabSplit,
 };
 use curio_settings::Settings;
 use curio_spaces::{ClosedTab, Space, Workspace};
@@ -112,6 +112,18 @@ impl Database {
         Ok(Self { conn })
     }
 
+    /// Copies everything in the write-ahead log into the main database file
+    /// and empties the log. Called on quit so `curio.db` alone holds all the
+    /// data.
+    ///
+    /// # Errors
+    /// Fails on SQLite errors.
+    pub fn checkpoint(&self) -> Result<()> {
+        self.conn
+            .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))?;
+        Ok(())
+    }
+
     // ----- Key/value ----------------------------------------------------
 
     /// Reads a small value from the key/value table.
@@ -179,7 +191,8 @@ impl Database {
         let tx = self.conn.transaction()?;
         tx.execute_batch(
             "DELETE FROM spaces; DELETE FROM tabs; DELETE FROM tab_groups;
-             DELETE FROM layout; DELETE FROM favorites; DELETE FROM closed_tabs;",
+             DELETE FROM layout; DELETE FROM favorites; DELETE FROM closed_tabs;
+             DELETE FROM tab_splits;",
         )?;
         {
             let mut insert_space = tx.prepare(
@@ -201,6 +214,8 @@ impl Database {
             )?;
             let mut insert_favorite =
                 tx.prepare("INSERT INTO favorites (id, position) VALUES (?1, ?2)")?;
+            let mut insert_split =
+                tx.prepare("INSERT INTO tab_splits (id, space_id, data) VALUES (?1, ?2, ?3)")?;
 
             let mut write_tab = |tab: &Tab, kind: &str, owner: String| -> rusqlite::Result<()> {
                 insert_tab.execute(params![
@@ -253,6 +268,11 @@ impl Database {
                         ])?;
                     }
                 }
+                for split in space.strip.splits() {
+                    let data = serde_json::to_string(split)
+                        .map_err(|error| StorageError::Corrupt(error.to_string()))?;
+                    insert_split.execute(params![split.id.to_string(), space_id, data])?;
+                }
                 for (section, items) in [("pinned", pinned), ("unpinned", unpinned)] {
                     for (position, item) in items.iter().enumerate() {
                         let (kind, id) = match item {
@@ -291,9 +311,14 @@ impl Database {
         Ok(())
     }
 
-    /// Closed tabs saved with the session, newest first. Rows that can't be
-    /// read (for example from a newer build) are skipped.
-    fn load_closed_tabs(&self) -> Result<Vec<ClosedTab>> {
+    /// The saved Archived Tabs, newest first. Rows that can't be read (for
+    /// example from a newer build) are skipped. Loaded with the session, and
+    /// on their own when the session isn't restored, so the archive is never
+    /// lost.
+    ///
+    /// # Errors
+    /// Fails on SQLite errors.
+    pub fn load_closed_tabs(&self) -> Result<Vec<ClosedTab>> {
         let mut stmt = self
             .conn
             .prepare("SELECT data FROM closed_tabs ORDER BY position")?;
@@ -401,6 +426,24 @@ impl Database {
             }
         }
 
+        // Split views by space. Unreadable rows (from a newer build) are
+        // skipped; their tabs show as ordinary tabs.
+        let mut splits_by_space: HashMap<String, Vec<TabSplit>> = HashMap::new();
+        {
+            let mut stmt = self
+                .conn
+                .prepare("SELECT space_id, data FROM tab_splits ORDER BY id")?;
+            let rows =
+                stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+            for row in rows {
+                let (space, data) = row?;
+                match serde_json::from_str::<TabSplit>(&data) {
+                    Ok(split) => splits_by_space.entry(space).or_default().push(split),
+                    Err(error) => tracing::warn!(%error, "skipping unreadable split view"),
+                }
+            }
+        }
+
         let mut spaces = Vec::new();
         {
             let mut stmt = self.conn.prepare(
@@ -442,7 +485,8 @@ impl Database {
                     }
                 }
                 let tabs = tabs_by_owner.remove(&id).unwrap_or_default();
-                let strip = TabStrip::from_parts(tabs, groups, pinned, unpinned);
+                let splits = splits_by_space.remove(&id).unwrap_or_default();
+                let strip = TabStrip::from_parts(tabs, groups, pinned, unpinned, splits);
                 let active_tab = active_tab.as_deref().map(parse_id::<TabId>).transpose()?;
                 spaces.push(Space {
                     id: parse_id::<SpaceId>(&id)?,
@@ -1178,6 +1222,125 @@ mod tests {
         let downloads = db.downloads(10).expect("list");
         assert_eq!(downloads[0].state, "completed");
         assert_eq!(downloads[0].path.as_deref(), Some("/tmp/f.zip"));
+    }
+
+    #[test]
+    fn folders_survive_a_restart() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("curio.db");
+        let mut ws = sample_workspace();
+        let space = ws.spaces()[0].id;
+        let tab = ws.spaces()[0].strip.ordered_tab_ids()[0];
+        let (full, empty) = {
+            let strip = &mut ws.space_mut(space).expect("space").strip;
+            let full = strip.create_group("Reading", AccentColor::Ocean, &[tab]);
+            strip.rename_group(full, "Read Later");
+            strip.set_group_collapsed(full, true);
+            let empty = strip.create_group("Empty", AccentColor::Rose, &[]);
+            (full, empty)
+        };
+        {
+            let mut db = Database::open(&path).expect("open");
+            db.save_workspace(&ws).expect("save");
+        }
+
+        let db = Database::open(&path).expect("reopen");
+        let loaded = db.load_workspace().expect("load").expect("saved");
+        let strip = &loaded.space(space).expect("space").strip;
+        let full = strip.group(full).expect("folder kept");
+        assert_eq!(full.name, "Read Later");
+        assert!(full.collapsed);
+        assert_eq!(full.tabs, vec![tab]);
+        assert!(strip.is_saved(tab));
+        assert!(strip.tab(tab).is_some_and(|t| t.home_url.is_some()));
+        let empty = strip.group(empty).expect("empty folder kept");
+        assert_eq!(empty.color, AccentColor::Rose);
+        assert!(empty.tabs.is_empty());
+        assert_eq!(loaded.space(space), ws.space(space));
+    }
+
+    #[test]
+    fn split_views_survive_a_restart_in_their_space_and_folder() {
+        let mut db = Database::open_in_memory().expect("db");
+        let mut ws = sample_workspace();
+        let space = ws.spaces()[0].id;
+        for url in ["https://left.test", "https://right.test"] {
+            ws.open_tab(
+                space,
+                Tab::new(url),
+                Placement::SectionEnd(Section::Unpinned),
+                false,
+            );
+        }
+        let (folder, top_split, folder_split, ids) = {
+            let strip = &mut ws.space_mut(space).expect("space").strip;
+            let ids = strip.ordered_tab_ids();
+            let folder = strip.create_group("Compare", AccentColor::Ocean, &[ids[0]]);
+            let folder_split = strip
+                .create_split(&[ids[0], ids[1]], curio_core::SplitOrientation::Vertical)
+                .expect("split in folder");
+            strip.resize_split(folder_split, 0, 0.15);
+            let rest: Vec<TabId> = strip
+                .ordered_tab_ids()
+                .into_iter()
+                .filter(|t| !strip.is_saved(*t))
+                .collect();
+            let top_split = strip
+                .create_split(&rest[..2], curio_core::SplitOrientation::Horizontal)
+                .expect("top-level split");
+            (folder, top_split, folder_split, ids)
+        };
+        db.save_workspace(&ws).expect("save");
+        let loaded = db.load_workspace().expect("load").expect("some");
+        let strip = &loaded.space(space).expect("space").strip;
+
+        let in_folder = strip.split(folder_split).expect("folder split kept");
+        assert_eq!(in_folder.tabs, vec![ids[0], ids[1]]);
+        assert_eq!(
+            in_folder.orientation,
+            curio_core::SplitOrientation::Vertical
+        );
+        assert!((in_folder.sizes[0] - 0.65).abs() < 1e-5);
+        assert_eq!(
+            strip.group(folder).map(|g| g.tabs.clone()),
+            Some(vec![ids[0], ids[1]]),
+            "the split stays in its folder"
+        );
+        assert!(strip.split(top_split).is_some());
+        assert_eq!(
+            strip.ordered_tab_ids(),
+            ws.space(space).expect("space").strip.ordered_tab_ids()
+        );
+    }
+
+    #[test]
+    fn archived_tabs_persist_in_the_database_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("curio.db");
+        let mut ws = sample_workspace();
+        let closed = ws.spaces()[0].strip.ordered_tab_ids()[0];
+        ws.close_tab(closed).expect("tab exists");
+        {
+            let mut db = Database::open(&path).expect("open");
+            db.save_workspace(&ws).expect("save");
+            db.checkpoint().expect("checkpoint");
+        }
+        let wal = dir.path().join("curio.db-wal");
+        assert!(
+            std::fs::metadata(&wal).map_or(true, |m| m.len() == 0),
+            "checkpoint empties the write-ahead log"
+        );
+
+        let db = Database::open(&path).expect("reopen");
+        let archive: Vec<TabId> = db
+            .load_closed_tabs()
+            .expect("load")
+            .iter()
+            .map(|c| c.tab.id)
+            .collect();
+        assert_eq!(archive, vec![closed]);
+        let loaded = db.load_workspace().expect("load").expect("saved");
+        assert_eq!(loaded.closed_tab_count(), 1);
     }
 
     #[test]

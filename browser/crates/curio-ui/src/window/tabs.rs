@@ -78,20 +78,22 @@ impl BrowserWindow {
         self.tab_subscriptions.remove(&id);
     }
 
-    /// Makes the workspace's active tab visible and every other tab hidden,
-    /// creating the active tab's webview on demand.
+    /// Makes the workspace's active tab visible (with the other panes of
+    /// its split view, if any) and every other tab hidden, creating webviews
+    /// on demand.
     pub(crate) fn sync_active_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let active = self.workspace.active_tab_id();
+        let visible = self.visible_tab_ids();
         for (id, entity) in &self.tabs {
-            if Some(*id) != active && entity.read(cx).is_active() {
+            if !visible.contains(id) && entity.read(cx).is_active() {
                 entity.update(cx, |tab, cx| tab.set_active(false, window, cx));
             }
         }
-        if let Some(active) = active
-            && let Some(entity) = self.ensure_tab_entity(active, window, cx)
-            && !entity.read(cx).is_active()
-        {
-            entity.update(cx, |tab, cx| tab.set_active(true, window, cx));
+        for id in visible {
+            if let Some(entity) = self.ensure_tab_entity(id, window, cx)
+                && !entity.read(cx).is_active()
+            {
+                entity.update(cx, |tab, cx| tab.set_active(true, window, cx));
+            }
         }
         let title = self
             .workspace
@@ -132,17 +134,13 @@ impl BrowserWindow {
         let space = after
             .and_then(|t| self.workspace.space_of_tab(t))
             .unwrap_or_else(|| self.workspace.active_space_id());
-        let placement = match after {
-            Some(after)
-                if self
-                    .workspace
-                    .space(space)
-                    .is_some_and(|s| !s.strip.is_pinned(after)) =>
-            {
-                Placement::AfterTab(after)
-            }
-            _ => Placement::SectionStart(Section::Unpinned),
-        };
+        // Next to `after`, but never inside a folder or the pinned section.
+        let placement = self
+            .workspace
+            .space(space)
+            .map_or(Placement::SectionStart(Section::Unpinned), |s| {
+                s.strip.placement_for_new_tab(after)
+            });
         self.workspace.open_tab(space, tab, placement, false);
         if activate {
             self.activate_tab(id, window, cx);
@@ -176,8 +174,8 @@ impl BrowserWindow {
             self.open_url_in_new_tab(url, None, true, window, cx);
             return;
         };
+        self.workspace.set_tab_url(id, url);
         if let Some(tab) = self.workspace.tab_mut(id) {
-            tab.url = url.to_owned();
             tab.title.clear();
             tab.favicon_url = None;
             tab.scroll_y = 0.0;
@@ -371,13 +369,10 @@ impl BrowserWindow {
                     return;
                 };
                 let state = entity.read(cx).state().clone();
-                let mut changed = false;
+                let mut changed =
+                    !state.url.is_empty() && self.workspace.set_tab_url(id, &state.url);
                 let mut title_changed = None;
                 if let Some(tab) = self.workspace.tab_mut(id) {
-                    if !state.url.is_empty() && tab.url != state.url {
-                        tab.url.clone_from(&state.url);
-                        changed = true;
-                    }
                     if !state.title.is_empty() && tab.title != state.title {
                         tab.title.clone_from(&state.title);
                         changed = true;
@@ -425,6 +420,14 @@ impl BrowserWindow {
             BrowserTabEvent::SelectionChanged => {
                 if self.workspace.active_tab_id() == Some(id) {
                     cx.notify();
+                }
+            }
+            BrowserTabEvent::Focused => {
+                // Clicking into another pane of the split view focuses it.
+                if self.workspace.active_tab_id() != Some(id)
+                    && self.visible_split().is_some_and(|s| s.contains(id))
+                {
+                    self.activate_tab(id, window, cx);
                 }
             }
             BrowserTabEvent::Scrolled { y } => {

@@ -1,24 +1,28 @@
 //! Site icons and Curio's logo.
 
+use std::{future::Future, sync::Arc, time::Duration};
+
 use gpui_kit::component::Sizable as _;
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::{
-    App, FontWeight, Hsla, IntoElement, ParentElement as _, Pixels, RenderOnce, SharedString,
-    Styled as _, StyledImage as _, Window, div, img, px,
+    App, Asset, FontWeight, Hsla, ImageAssetLoader, ImageSource, IntoElement, ParentElement as _,
+    Pixels, RenderImage, RenderOnce, Resource, SharedString, Styled as _, Window, div, img, px,
 };
+use url::Url;
 
 use crate::theme::CurioTheme;
 
 /// A site's favicon. Falls back to a colored letter while the image loads or
-/// when there is none, and shows a spinner while the page is loading.
+/// when the site has no usable icon, and shows a spinner while the page is loading.
 ///
 /// ```ignore
-/// Favicon::new(&title).url(tab.favicon_url.as_deref()).loading(state.loading)
+/// Favicon::new(&title).url(tab.favicon_url.as_deref()).page_url(&tab.url).loading(state.loading)
 /// ```
 #[derive(IntoElement)]
 pub struct Favicon {
     label: SharedString,
     url: Option<SharedString>,
+    page_icon: Option<String>,
     size: Pixels,
     loading: bool,
 }
@@ -33,15 +37,23 @@ impl Favicon {
         Self {
             label: label.into(),
             url: None,
+            page_icon: None,
             size: Self::DEFAULT_SIZE,
             loading: false,
         }
     }
 
-    /// The icon's image URL. Empty or missing URLs show the letter.
+    /// The icon URL declared by the page.
     #[must_use]
     pub fn url<S: Into<SharedString>>(mut self, url: Option<S>) -> Self {
         self.url = url.map(Into::into).filter(|u| !u.is_empty());
+        self
+    }
+
+    /// Try the page's conventional favicon when its declared icon is unavailable.
+    #[must_use]
+    pub fn page_url(mut self, page_url: &str) -> Self {
+        self.page_icon = default_icon_url(page_url);
         self
     }
 
@@ -61,7 +73,7 @@ impl Favicon {
 }
 
 impl RenderOnce for Favicon {
-    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let size = self.size;
         if self.loading {
             let accent = CurioTheme::get(cx).accent;
@@ -89,15 +101,62 @@ impl RenderOnce for Favicon {
                 .child(letter.clone())
                 .into_any_element()
         };
-        match self.url {
-            Some(url) => img(url)
-                .size(size)
-                .rounded(px(3.))
-                .with_fallback(fallback.clone())
-                .with_loading(fallback)
-                .into_any_element(),
-            None => fallback(),
+        for url in icon_candidates(self.url.as_deref(), self.page_icon.as_deref()) {
+            let ImageSource::Resource(source) = ImageSource::from(url) else {
+                continue;
+            };
+            match window.use_asset::<FaviconImage>(&source, cx) {
+                Some(Some(image)) => {
+                    return img(image).size(size).rounded(px(3.)).into_any_element();
+                }
+                Some(None) => continue,
+                None => return fallback(),
+            }
         }
+        fallback()
+    }
+}
+
+fn default_icon_url(page_url: &str) -> Option<String> {
+    let url = Url::parse(page_url).ok()?;
+    match url.origin() {
+        origin @ url::Origin::Tuple(..) if matches!(url.scheme(), "http" | "https") => {
+            Some(format!("{}/favicon.ico", origin.ascii_serialization()))
+        }
+        _ => None,
+    }
+}
+
+fn icon_candidates<'a>(
+    declared: Option<&'a str>,
+    conventional: Option<&'a str>,
+) -> impl Iterator<Item = &'a str> {
+    declared
+        .into_iter()
+        .chain(conventional.filter(move |url| Some(*url) != declared))
+}
+
+enum FaviconImage {}
+
+impl Asset for FaviconImage {
+    type Source = Resource;
+    type Output = Option<Arc<RenderImage>>;
+
+    fn load(source: Resource, cx: &mut App) -> impl Future<Output = Self::Output> + Send + 'static {
+        let timeout = cx.background_executor().timer(Duration::from_secs(5));
+        let image = ImageAssetLoader::load(source.clone(), cx);
+        futures_lite::future::race(
+            async move {
+                image
+                    .await
+                    .inspect_err(|error| tracing::debug!(?source, %error, "could not load favicon"))
+                    .ok()
+            },
+            async move {
+                timeout.await;
+                None
+            },
+        )
     }
 }
 
@@ -128,6 +187,34 @@ fn letter_color(seed: &str) -> Hsla {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_icon_uses_the_page_origin() {
+        assert_eq!(
+            default_icon_url("https://user:secret@example.com:8443/path?q=1#here").as_deref(),
+            Some("https://example.com:8443/favicon.ico")
+        );
+        assert_eq!(default_icon_url("file:///tmp/index.html"), None);
+        assert_eq!(default_icon_url("blob:https://example.com/opaque-id"), None);
+    }
+
+    #[test]
+    fn icon_candidates_prefer_declared_icon_and_skip_duplicates() {
+        let default = "https://example.com/favicon.ico";
+        assert_eq!(
+            icon_candidates(Some("https://cdn.example.com/icon.svg"), Some(default))
+                .collect::<Vec<_>>(),
+            ["https://cdn.example.com/icon.svg", default]
+        );
+        assert_eq!(
+            icon_candidates(Some(default), Some(default)).collect::<Vec<_>>(),
+            [default]
+        );
+        assert_eq!(
+            icon_candidates(None, Some(default)).collect::<Vec<_>>(),
+            [default]
+        );
+    }
 
     #[test]
     fn initial_skips_punctuation_and_uppercases() {

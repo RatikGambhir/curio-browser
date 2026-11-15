@@ -183,3 +183,17 @@ impl RenderOnce for IconButton {
             .refine_style(&self.style)
     }
 }
+
+impl gpui_kit::component::Selectable for IconButton {
+    fn selected(mut self, selected: bool) -> Self {
+        self.selected = selected;
+        self
+    }
+
+    fn is_selected(&self) -> bool {
+        self.selected
+    }
+}
+
+/// Lets an icon button open a menu on click (shown as selected while open).
+impl gpui_kit::component::menu::DropdownMenu for IconButton {}

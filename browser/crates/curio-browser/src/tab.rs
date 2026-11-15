@@ -87,6 +87,8 @@ pub enum BrowserTabEvent {
     },
     /// The selection changed.
     SelectionChanged,
+    /// The user clicked into the page.
+    Focused,
     /// The page scrolled (debounced).
     Scrolled {
         y: f64,
@@ -217,75 +219,78 @@ impl BrowserTab {
             return;
         }
         let (tx, rx) = async_channel::unbounded::<RawEvent>();
-        let builder = self.engine.builder(&self.state.url);
         let builder = {
-            let tx = tx.clone();
-            builder.with_ipc_handler(move |request| {
-                let _ = tx.try_send(RawEvent::Ipc(request.into_body()));
-            })
+            self.engine
+                .builder(&self.state.url)
+                .with_ipc_handler({
+                    let tx = tx.clone();
+                    move |request| {
+                        let _ = tx.try_send(RawEvent::Ipc(request.into_body()));
+                    }
+                })
+                .with_on_page_load_handler({
+                    let tx = tx.clone();
+                    move |event, url| {
+                        let _ = tx.try_send(RawEvent::Load(event, url));
+                    }
+                })
+                .with_document_title_changed_handler({
+                    let tx = tx.clone();
+                    move |title| {
+                        let _ = tx.try_send(RawEvent::Title(title));
+                    }
+                })
+                .with_navigation_handler({
+                    let tx = tx.clone();
+                    move |url| {
+                        if crate::engine::is_engine_navigable(&url) {
+                            true
+                        } else {
+                            let _ = tx.try_send(RawEvent::External(url));
+                            false
+                        }
+                    }
+                })
+                .with_new_window_req_handler({
+                    let tx = tx.clone();
+                    move |url, _features| {
+                        // Pop-ups and target=_blank links become Curio tabs.
+                        if crate::engine::is_engine_navigable(&url) && !url.is_empty() {
+                            let _ = tx.try_send(RawEvent::NewWindow(url));
+                        }
+                        NewWindowResponse::Deny
+                    }
+                })
+                .with_download_started_handler({
+                    let tx = tx.clone();
+                    let download_dir = self.engine.download_dir.clone();
+                    move |url, path| {
+                        if let Some(dir) = &download_dir
+                            && let Some(name) = path.file_name()
+                        {
+                            *path = crate::engine::unique_path(&dir.join(name));
+                        }
+                        // A missing folder would fail the download.
+                        if let Some(parent) = path.parent()
+                            && let Err(error) = std::fs::create_dir_all(parent)
+                        {
+                            tracing::warn!(%error, "could not create the download folder");
+                        }
+                        let _ = tx.try_send(RawEvent::DownloadStarted(
+                            url,
+                            path.to_string_lossy().into_owned(),
+                        ));
+                        true
+                    }
+                })
+                .with_download_completed_handler(move |url, path, success| {
+                    let _ = tx.try_send(RawEvent::DownloadFinished(
+                        url,
+                        path.map(|p| p.to_string_lossy().into_owned()),
+                        success,
+                    ));
+                })
         };
-        let builder = {
-            let tx = tx.clone();
-            builder.with_on_page_load_handler(move |event, url| {
-                let _ = tx.try_send(RawEvent::Load(event, url));
-            })
-        };
-        let builder = {
-            let tx = tx.clone();
-            builder.with_document_title_changed_handler(move |title| {
-                let _ = tx.try_send(RawEvent::Title(title));
-            })
-        };
-        let builder = {
-            let tx = tx.clone();
-            builder.with_navigation_handler(move |url| {
-                if crate::engine::is_engine_navigable(&url) {
-                    true
-                } else {
-                    let _ = tx.try_send(RawEvent::External(url));
-                    false
-                }
-            })
-        };
-        let builder = {
-            let tx = tx.clone();
-            builder.with_new_window_req_handler(move |url, _features| {
-                // Pop-ups and target=_blank links become Curio tabs.
-                if crate::engine::is_engine_navigable(&url) && !url.is_empty() {
-                    let _ = tx.try_send(RawEvent::NewWindow(url));
-                }
-                NewWindowResponse::Deny
-            })
-        };
-        let builder = {
-            let tx = tx.clone();
-            let download_dir = self.engine.download_dir.clone();
-            builder.with_download_started_handler(move |url, path| {
-                if let Some(dir) = &download_dir
-                    && let Some(name) = path.file_name()
-                {
-                    *path = crate::engine::unique_path(&dir.join(name));
-                }
-                // A missing folder would fail the download.
-                if let Some(parent) = path.parent()
-                    && let Err(error) = std::fs::create_dir_all(parent)
-                {
-                    tracing::warn!(%error, "could not create the download folder");
-                }
-                let _ = tx.try_send(RawEvent::DownloadStarted(
-                    url,
-                    path.to_string_lossy().into_owned(),
-                ));
-                true
-            })
-        };
-        let builder = builder.with_download_completed_handler(move |url, path, success| {
-            let _ = tx.try_send(RawEvent::DownloadFinished(
-                url,
-                path.map(|p| p.to_string_lossy().into_owned()),
-                success,
-            ));
-        });
 
         let webview = match WebView::build(builder, window, cx) {
             Ok(webview) => webview,
@@ -454,6 +459,7 @@ impl BrowserTab {
                 }
             }
             PageMessage::Key { keystroke } => cx.emit(BrowserTabEvent::Shortcut { keystroke }),
+            PageMessage::Focused => cx.emit(BrowserTabEvent::Focused),
         }
     }
 
