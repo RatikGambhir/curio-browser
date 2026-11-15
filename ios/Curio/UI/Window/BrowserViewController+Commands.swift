@@ -82,8 +82,15 @@ extension BrowserViewController {
         case .selectTab7: session.selectTab(at: 6)
         case .selectTab8: session.selectTab(at: 7)
         case .selectLastTab: session.selectTab(at: nil)
+        case .newFolder: newFolder()
         case .newGroupFromTab:
-            if let active, let group = session.newGroup(with: [active]) { sidebarRenameGroup(group) }
+            if let active, let group = session.newGroup(with: [active]) { beginFolderRename(group) }
+        case .splitView:
+            switch session.splitView() {
+            case .added, .noActiveTab: openCommandBar(.newTab)
+            case .refused: break
+            }
+        case .separateSplitView: session.separateSplitView()
         case .addFavorite: if let active { session.addFavorite(active) }
         case .toggleBookmark: session.toggleBookmark()
         case .copyURL: session.copyActiveURL()
@@ -144,9 +151,33 @@ extension BrowserViewController {
         }
     }
 
+    // MARK: - Folders
+
+    /// Makes an empty folder at the top of the active space's tabs and opens
+    /// its name for editing.
+    func newFolder() {
+        beginFolderRename(session.newFolder())
+    }
+
+    /// Shows the sidebar (drawer, peek or column) and edits a folder's name
+    /// in its row. The horizontal tab strip has no folder rows, so wide
+    /// screens with horizontal tabs skip the rename.
+    func beginFolderRename(_ id: UUID) {
+        if isCompact {
+            if !drawerOpen { setDrawer(open: true) }
+        } else {
+            guard verticalTabs else { return }
+            if libraryOpen { toggleLibrary() }
+            if !sidebarColumnVisible && !drawerOpen { setPeek(open: true) }
+        }
+        sidebar.beginFolderRename(id)
+    }
+
     /// Closes the topmost transient thing, or stops loading.
     func escape() {
-        if commandBar != nil {
+        if sidebar.cancelFolderRename() {
+            return
+        } else if commandBar != nil {
             closeCommandBar()
         } else if page.findOpen {
             page.closeFind()
@@ -328,6 +359,28 @@ extension BrowserViewController {
     }
 
     // MARK: - Keyboard and menu bar
+
+    /// Split view commands are hidden and their shortcuts off while the page
+    /// area can't show a split.
+    override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+        if action == #selector(performCurioCommand(_:)), let command = Self.curioCommand(sender), command.needsSplitView {
+            return session.splitAvailable
+        }
+        return super.canPerformAction(action, withSender: sender)
+    }
+
+    override func validate(_ command: UICommand) {
+        super.validate(command)
+        if command.action == #selector(performCurioCommand(_:)), Self.curioCommand(command)?.needsSplitView == true {
+            command.attributes = session.splitAvailable ? [] : .hidden
+        }
+    }
+
+    private static func curioCommand(_ sender: Any?) -> CurioCommand? {
+        guard let value = (sender as? UICommand)?.propertyList as? String,
+              let name = value.split(separator: "#").first else { return nil }
+        return CurioCommand(rawValue: String(name))
+    }
 
     /// Target of every Curio key command in the menu bar.
     @objc func performCurioCommand(_ sender: Any?) {

@@ -1,7 +1,8 @@
 import UIKit
 
 /// A tab in the sidebar: icon (or spinner), title, and a close button that
-/// shows on hover and for the active tab.
+/// shows on hover and for the active tab. Saved tabs (pinned or in a folder)
+/// show − while their page is live, which unloads it, and × once unloaded.
 final class TabRowCell: UICollectionViewListCell {
     let row = ListRowView()
     private let favicon = FaviconView(size: 16)
@@ -49,11 +50,12 @@ final class TabRowCell: UICollectionViewListCell {
         row.setSpacing(10)
         favicon.configure(label: model.title, url: model.favicon, loading: model.loading)
         favicon.alpha = model.asleep && !model.active && !model.pinned ? 0.65 : 1
-        closeButton.setIcon(model.pinned ? .minus : .close, label: model.pinned ? "Unload Tab" : "Close Tab")
+        let closeLabel = Self.closeLabel(model)
+        closeButton.setIcon(model.unloads ? .minus : .close, label: closeLabel)
         closeButton.tint = ThemeCenter.shared.theme.textFaint.uiColor
         accessibilityLabel = model.title
         accessibilityTraits = model.active ? [.button, .selected] : .button
-        accessibilityCustomActions = [UIAccessibilityCustomAction(name: model.pinned ? "Unload Tab" : "Close Tab") { [weak self] _ in
+        accessibilityCustomActions = [UIAccessibilityCustomAction(name: closeLabel) { [weak self] _ in
             guard let self, let model = self.model else { return false }
             onClose?(model)
             return true
@@ -61,8 +63,21 @@ final class TabRowCell: UICollectionViewListCell {
         updateCloseButton()
     }
 
+    static func closeLabel(_ model: TabViewModel) -> String {
+        if model.unloads { return "Unload Tab" }
+        return model.saved ? "Archive Tab" : "Close Tab"
+    }
+
+    /// No hover to reveal the button: iPhone, or an iPad without a pointer.
+    private var touchOnly: Bool {
+        traitCollection.userInterfaceIdiom == .phone || !HoverTracker.pointerSeen
+    }
+
     private func updateCloseButton() {
-        closeButton.alpha = (model?.active ?? false) || pointerInside ? 1 : 0
+        // On touch, an unloaded saved tab keeps its × showing so it can be
+        // archived with a tap; pointer users reveal it by hovering.
+        let archivable = (model?.saved ?? false) && !(model?.unloads ?? true) && touchOnly
+        closeButton.alpha = (model?.active ?? false) || pointerInside || archivable ? 1 : 0
         closeButton.isUserInteractionEnabled = closeButton.alpha > 0
     }
 

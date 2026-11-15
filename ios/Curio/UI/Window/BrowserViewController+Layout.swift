@@ -107,6 +107,7 @@ extension BrowserViewController {
         }
 
         let changes = {
+            defer { self.updateSplitRoom() }
             self.sidebarHost.alpha = libraryVisible ? 0 : 1
             self.libraryHost.alpha = libraryVisible ? 1 : 0
             self.aiColumn.alpha = aiVisible ? 1 : 0
@@ -123,6 +124,28 @@ extension BrowserViewController {
             aiColumn.isHidden = !aiVisible
         }
     }
+
+    // MARK: - Split view room
+
+    /// Tells the session how much room the page area has for split views.
+    /// iPads and large unfolded phone displays can show them; regular
+    /// iPhones (portrait or landscape) and narrow layouts never do.
+    func updateSplitRoom() {
+        let supported: Bool
+        if isCompact {
+            supported = false
+        } else if traitCollection.userInterfaceIdiom == .pad {
+            supported = true
+        } else {
+            let screen = view.window?.windowScene?.screen.bounds.size ?? .zero
+            supported = min(screen.width, screen.height) >= Self.minimumSplitScreenSide
+        }
+        session.setSplitRoom(SplitRoom(supported: supported, size: page.view.bounds.size))
+    }
+
+    /// A phone display whose shorter side reaches this is an unfolded
+    /// foldable's inner display; every regular iPhone is narrower.
+    static let minimumSplitScreenSide: CGFloat = 600
 
     // MARK: - Sidebar placement
 
@@ -183,6 +206,8 @@ extension BrowserViewController {
     private func showDrawer(_ open: Bool, closedOffset: CGFloat, openOffset: CGFloat, scrim: Bool) {
         guard open != drawerOpen || drawer.isHidden == open else { return }
         drawerOpen = open
+        // A folder name being edited is saved when the sidebar slides away.
+        if !open { sidebar.commitFolderRename() }
         // The phone drawer covers the page; VoiceOver stays inside it.
         drawer.accessibilityViewIsModal = open && scrim
         drawer.isHidden = false

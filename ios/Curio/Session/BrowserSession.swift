@@ -14,13 +14,17 @@ final class BrowserSession {
     private var saveTask: Task<Void, Never>?
     private var maintenanceTask: Task<Void, Never>?
     private var appearance: UIUserInterfaceStyle = .unspecified
+    /// The room the page area has for split views; set by the browser
+    /// screen as its layout changes.
+    private(set) var splitRoom: SplitRoom = .none
 
     init(services: AppServices) {
         self.services = services
         let restored = services.settings.settings.browsing.restoreSession ? services.workspaceStore.load() : nil
         workspace = restored ?? .firstRun()
         if restored == nil, let saved = services.workspaceStore.load() {
-            // Not restoring tabs still keeps spaces, pinned tabs and favorites.
+            // Not restoring tabs still keeps spaces, saved tabs (pinned and in
+            // folders), folders and favorites.
             workspace = Self.withoutRegularTabs(saved)
         }
         maintenanceTask = Task { [weak self] in
@@ -41,11 +45,8 @@ final class BrowserSession {
     private static func withoutRegularTabs(_ saved: Workspace) -> Workspace {
         var workspace = saved
         for space in saved.spaces {
-            for item in space.strip.items(.unpinned) {
-                switch item {
-                case .tab(let id): _ = workspace.closeTab(id)
-                case .group(let id): workspace.updateSpace(space.id) { _ = $0.strip.deleteGroup(id, keepTabs: false) }
-                }
+            for case .tab(let id) in space.strip.items(.unpinned) {
+                _ = workspace.closeTab(id)
             }
             workspace.updateSpace(space.id) { $0.activeTab = $0.strip.orderedTabIDs.first }
         }
@@ -67,6 +68,7 @@ final class BrowserSession {
             favicon: tab.faviconURL,
             active: workspace.activeTabID == id,
             pinned: workspace.activeSpace.strip.isPinned(id),
+            saved: isSaved(id),
             loading: live?.state.loading ?? false,
             asleep: !(live?.isAwake ?? false)
         )
@@ -134,15 +136,16 @@ final class BrowserSession {
         for tab in liveTabs.values { tab.setAppearance(style) }
     }
 
-    /// Makes the active tab visible (creating its web view on demand) and
-    /// every other tab hidden.
+    /// Makes the visible tabs (the active tab, or every pane of its split
+    /// view) visible, creating their web views on demand, and every other
+    /// tab hidden. Visible tabs never sleep.
     func syncActiveTab() {
-        let active = workspace.activeTabID
-        for (id, live) in liveTabs where id != active && live.isActive {
+        let visible = visibleTabIDs
+        for (id, live) in liveTabs where !visible.contains(id) && live.isActive {
             live.setActive(false)
         }
-        if let active, let live = ensureLiveTab(active), !live.isActive {
-            live.setActive(true)
+        for id in visible {
+            if let live = ensureLiveTab(id), !live.isActive { live.setActive(true) }
         }
         delegate?.session(self, didChange: .activeTab)
         delegate?.session(self, didChange: .tabs)
@@ -158,17 +161,15 @@ final class BrowserSession {
         scheduleSave()
     }
 
-    /// Opens `url` in a new tab next to `after` (or at the top of the active
-    /// space's regular tabs).
+    /// Opens `url` in a new tab near `after` (the active tab by default):
+    /// right after a regular tab, right below a folder, or at the top of the
+    /// regular tabs. New tabs never open inside a folder.
     @discardableResult
     func openInNewTab(_ url: String, after: UUID? = nil, activate: Bool = true) -> UUID {
         let tab = Tab(url: url)
-        let space = after.flatMap(workspace.spaceOfTab) ?? workspace.activeSpaceID
-        let placement: TabPlacement = if let after, workspace.space(space)?.strip.isPinned(after) == false {
-            .afterTab(after)
-        } else {
-            .sectionStart(.unpinned)
-        }
+        let anchor = after ?? workspace.activeTabID
+        let space = anchor.flatMap(workspace.spaceOfTab) ?? workspace.activeSpaceID
+        let placement = workspace.space(space)?.strip.placementForNewTab(anchor: anchor) ?? .sectionStart(.unpinned)
         workspace.openTab(tab, in: space, at: placement, activate: false)
         if activate {
             activateTab(tab.id)
@@ -187,8 +188,8 @@ final class BrowserSession {
             openInNewTab(url)
             return
         }
+        workspace.setTabURL(id, url)
         workspace.updateTab(id) {
-            $0.url = url
             $0.title = ""
             $0.faviconURL = nil
             $0.scrollY = 0
@@ -213,7 +214,13 @@ final class BrowserSession {
         }
     }
 
-    /// Closes a tab. Favorites are put to sleep and hidden instead.
+    /// Whether a tab is kept when closed: pinned or in a folder.
+    func isSaved(_ id: UUID) -> Bool {
+        workspace.spaceOfTab(id).flatMap(workspace.space)?.strip.isSaved(id) ?? false
+    }
+
+    /// Closes a tab for good (it goes to Archived Tabs). Favorites are put to
+    /// sleep and hidden instead.
     func closeTab(_ id: UUID) {
         switch workspace.findTab(id)?.owner {
         case .favorite:
@@ -230,30 +237,47 @@ final class BrowserSession {
         scheduleSave()
     }
 
-    /// Pinned tabs are kept; "closing" them unloads the page instead.
+    /// Saved tabs (pinned or in a folder) are kept; "closing" them releases
+    /// the page and resets the tab to its home URL instead. A pane leaves its
+    /// split first (showing the split would load it again), and the pane
+    /// beside it takes the focus.
     func unloadTab(_ id: UUID) {
+        var beside: UUID?
+        if let spaceID = workspace.spaceOfTab(id), let split = workspace.space(spaceID)?.strip.split(of: id) {
+            beside = Workspace.paneBeside(id, in: split)
+            workspace.updateSpace(spaceID) { $0.strip.removeFromSplit(id) }
+        }
+        // Release first: sleeping reports the page's last URL one more time,
+        // which would otherwise overwrite the reset to home.
+        releaseTab(id)
         if let home = workspace.tab(id)?.homeURL {
             workspace.updateTab(id) {
                 $0.url = home
                 $0.scrollY = 0
             }
         }
-        releaseTab(id)
         if workspace.activeTabID == id {
             workspace.updateActiveSpace { space in
-                space.activeTab = space.strip.orderedTabIDs.first { $0 != id }
+                space.activeTab = beside ?? space.strip.orderedTabIDs.first { $0 != id }
             }
         }
         syncActiveTab()
         scheduleSave()
     }
 
+    /// Close Tab and ⌘W: unloads saved tabs, closes the rest.
     func closeOrUnloadTab(_ id: UUID) {
-        if workspace.activeSpace.strip.isPinned(id) { unloadTab(id) } else { closeTab(id) }
+        if isSaved(id) { unloadTab(id) } else { closeTab(id) }
+    }
+
+    /// A tab row's close button: unloads a saved tab whose page is live, and
+    /// otherwise closes the tab into Archived Tabs.
+    func unloadOrArchiveTab(_ id: UUID) {
+        if isSaved(id) && liveTabs[id]?.isAwake == true { unloadTab(id) } else { closeTab(id) }
     }
 
     func closeActiveTab() {
-        if let id = activeTabID { closeTab(id) }
+        if let id = activeTabID { closeOrUnloadTab(id) }
     }
 
     func reopenClosedTab() {
@@ -349,15 +373,36 @@ final class BrowserSession {
         changedTabs()
     }
 
-    /// Creates a "New Group" around `members` and returns it.
+    /// Creates a "New Folder" around `members` and returns it.
     func newGroup(with members: [UUID]) -> UUID? {
         guard let first = members.first, let spaceID = workspace.spaceOfTab(first),
               let space = workspace.space(spaceID) else { return nil }
-        let color = AccentColor.allCases[(space.strip.groups.count + 1) % AccentColor.allCases.count]
+        let color = Self.nextFolderColor(space)
         var group: UUID?
-        workspace.updateSpace(spaceID) { group = $0.strip.createGroup(name: "New Group", color: color, members: members) }
+        workspace.updateSpace(spaceID) { group = $0.strip.createGroup(name: Self.newFolderName, color: color, members: members) }
         changedTabs()
         return group
+    }
+
+    /// Creates an empty "New Folder" at the top of the active space's
+    /// regular tabs and returns it.
+    @discardableResult
+    func newFolder() -> UUID {
+        let color = Self.nextFolderColor(workspace.activeSpace)
+        var group = UUID()
+        workspace.updateActiveSpace { space in
+            group = space.strip.createGroup(name: Self.newFolderName, color: color, members: [])
+            space.strip.moveGroup(group, to: .sectionStart(.unpinned))
+        }
+        changedTabs()
+        return group
+    }
+
+    private static let newFolderName = "New Folder"
+
+    /// Cycles through the accent colors so neighboring folders differ.
+    private static func nextFolderColor(_ space: Space) -> AccentColor {
+        AccentColor.allCases[(space.strip.groups.count + 1) % AccentColor.allCases.count]
     }
 
     func renameGroup(_ group: UUID, to name: String) {
@@ -426,6 +471,177 @@ final class BrowserSession {
     private func changedTabs() {
         delegate?.session(self, didChange: .tabs)
         scheduleSave()
+    }
+
+    // MARK: - Split view
+
+    /// What Split View did.
+    enum SplitResult {
+        /// A new pane was added and focused; its page is chosen next.
+        case added
+        /// There is no tab to split with; open a new tab instead.
+        case noActiveTab
+        /// Refused (the reason was shown) or not available.
+        case refused
+    }
+
+    static let splitFullMessage = "A split view shows up to \(TabSplit.maxPanes) tabs"
+    static let splitFavoriteMessage = "Favorites can’t be shown in a split view"
+
+    /// Reports the page area's room for split views. Showing or hiding a
+    /// split when it starts or stops fitting.
+    func setSplitRoom(_ room: SplitRoom) {
+        guard room != splitRoom else { return }
+        let before = (visibleTabIDs, splitRoom.available)
+        splitRoom = room
+        if visibleTabIDs != before.0 {
+            syncActiveTab()
+        } else if room.available != before.1 {
+            delegate?.session(self, didChange: .tabs)
+        }
+    }
+
+    /// Whether Split View is offered right now.
+    var splitAvailable: Bool { splitRoom.available }
+
+    /// The split of the active tab in the active space, if any.
+    var activeSplit: TabSplit? {
+        activeTabID.flatMap { workspace.activeSpace.strip.split(of: $0) }
+    }
+
+    /// The split on screen: the active tab's, while all its panes fit.
+    var visibleSplit: TabSplit? {
+        activeSplit.flatMap { splitRoom.fits($0) ? $0 : nil }
+    }
+
+    /// The tabs whose pages are on screen: the active tab, or every pane of
+    /// its split view.
+    var visibleTabIDs: [UUID] {
+        if let split = visibleSplit { return split.tabs }
+        return activeTabID.map { [$0] } ?? []
+    }
+
+    func split(of tab: UUID) -> TabSplit? {
+        workspace.spaceOfTab(tab).flatMap(workspace.space)?.strip.split(of: tab)
+    }
+
+    /// Split View: adds a new tab beside the active tab (or as another pane
+    /// of its split) and focuses it, so its page can be chosen.
+    func splitView() -> SplitResult {
+        guard splitAvailable else { return .refused }
+        guard let active = activeTabID else { return .noActiveTab }
+        guard let spaceID = workspace.spaceOfTab(active), let strip = workspace.space(spaceID)?.strip else {
+            delegate?.session(self, showToast: Self.splitFavoriteMessage, title: nil, kind: .info)
+            return .refused
+        }
+        let existing = strip.split(of: active)
+        if existing?.isFull == true {
+            delegate?.session(self, showToast: Self.splitFullMessage, title: nil, kind: .info)
+            return .refused
+        }
+        let pane = Tab()
+        workspace.updateSpace(spaceID) { space in
+            space.strip.insert(pane, at: .afterTab(active))
+            if let existing, let index = existing.tabs.firstIndex(of: active) {
+                space.strip.addToSplit(existing.id, tab: pane.id, at: index + 1)
+            } else {
+                space.strip.createSplit([active, pane.id])
+            }
+        }
+        activateTab(pane.id)
+        return .added
+    }
+
+    /// Shows `tab` beside the active tab: before or after it, in a new split
+    /// or as another pane of the active tab's split. The split stays where
+    /// the active tab is (its space and folder), and `tab` takes the focus.
+    func splitWith(_ tab: UUID, before: Bool) {
+        guard let active = activeTabID, active != tab else { return }
+        guard let spaceID = workspace.spaceOfTab(active), splitAvailable else {
+            // The active tab is a favorite: just show the tab.
+            activateTab(tab)
+            return
+        }
+        switch workspace.spaceOfTab(tab) {
+        case nil:
+            delegate?.session(self, showToast: Self.splitFavoriteMessage, title: nil, kind: .info)
+            return
+        case .some(let other) where other != spaceID:
+            workspace.moveTab(tab, toSpace: spaceID)
+        default:
+            break
+        }
+        guard let strip = workspace.space(spaceID)?.strip else { return }
+        if let split = strip.split(of: active), !split.contains(tab) {
+            guard !split.isFull else {
+                delegate?.session(self, showToast: Self.splitFullMessage, title: nil, kind: .info)
+                return
+            }
+            let index = (split.tabs.firstIndex(of: active) ?? 0) + (before ? 0 : 1)
+            workspace.updateSpace(spaceID) { $0.strip.addToSplit(split.id, tab: tab, at: index) }
+        } else if strip.split(of: active) == nil {
+            // Out of any other split, then right beside the active tab so the
+            // new split forms where the active tab is.
+            workspace.updateSpace(spaceID) { space in
+                space.strip.removeFromSplit(tab)
+                space.strip.move(tab, to: before ? .beforeTab(active) : .afterTab(active))
+                space.strip.createSplit(before ? [tab, active] : [active, tab])
+            }
+        }
+        activateTab(tab)
+    }
+
+    /// Separate Split View: the active tab's split becomes ordinary tabs.
+    func separateSplitView() {
+        if let split = activeSplit { dissolveSplit(split.id) }
+    }
+
+    func dissolveSplit(_ id: UUID) {
+        workspace.updateActiveSpace { $0.strip.dissolveSplit(id) }
+        syncActiveTab()
+        scheduleSave()
+    }
+
+    /// Takes a tab out of its split, putting it right after the split.
+    func removeFromSplit(_ tab: UUID) {
+        guard let spaceID = workspace.spaceOfTab(tab) else { return }
+        var removed = false
+        workspace.updateSpace(spaceID) { removed = $0.strip.removeFromSplit(tab) }
+        guard removed else { return }
+        syncActiveTab()
+        scheduleSave()
+    }
+
+    /// Switches a split between side by side and stacked.
+    func flipSplit(_ id: UUID) {
+        workspace.updateActiveSpace { $0.strip.flipSplit(id) }
+        // A stacked split may fit where side by side didn't, or the reverse.
+        syncActiveTab()
+        delegate?.session(self, didChange: .split)
+        scheduleSave()
+    }
+
+    /// Gives every pane of a split the same room.
+    func equalizeSplit(_ id: UUID) {
+        workspace.updateActiveSpace { $0.strip.equalizeSplit(id) }
+        delegate?.session(self, didChange: .split)
+        scheduleSave()
+    }
+
+    /// Moves a divider while it is dragged. Returns whether anything moved;
+    /// the caller lays the panes out again.
+    @discardableResult
+    func resizeSplit(_ id: UUID, divider: Int, by delta: Double) -> Bool {
+        var moved = false
+        workspace.updateActiveSpace { moved = $0.strip.resizeSplit(id, divider: divider, by: delta) }
+        if moved { scheduleSave() }
+        return moved
+    }
+
+    /// Focuses a visible pane (a tap in it, or its sidebar segment).
+    func focusPane(_ id: UUID) {
+        guard id != activeTabID else { return }
+        activateTab(id)
     }
 
     // MARK: - Spaces
@@ -624,11 +840,10 @@ extension BrowserSession: BrowserTabDelegate {
         var changed = false
         var titleChanged = false
         if let model = workspace.tab(tab.id) {
+            if !state.url.isEmpty && workspace.setTabURL(tab.id, state.url) {
+                changed = true
+            }
             workspace.updateTab(tab.id) { model in
-                if !state.url.isEmpty && model.url != state.url {
-                    model.url = state.url
-                    changed = true
-                }
                 if !state.title.isEmpty && model.title != state.title {
                     model.title = state.title
                     changed = true
@@ -691,5 +906,9 @@ extension BrowserSession: BrowserTabDelegate {
 
     func tab(_ tab: BrowserTab, present alert: UIAlertController) {
         delegate?.session(self, present: alert)
+    }
+
+    func tabDidRequestFocus(_ tab: BrowserTab) {
+        if tab.id != activeTabID, visibleTabIDs.contains(tab.id) { focusPane(tab.id) }
     }
 }

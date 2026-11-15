@@ -245,6 +245,8 @@ extension BrowserTab: WKScriptMessageHandler {
             delegate?.tabStateDidChange(self)
         case "scroll":
             if let y = body["y"] as? Double, y.isFinite { delegate?.tab(self, didScrollTo: y) }
+        case "focus":
+            delegate?.tabDidRequestFocus(self)
         default:
             break
         }

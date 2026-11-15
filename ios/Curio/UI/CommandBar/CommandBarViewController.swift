@@ -23,7 +23,8 @@ final class CommandBarViewController: UIViewController, UITextFieldDelegate, UIC
     private var listHeight: NSLayoutConstraint?
     private lazy var results = CommandResults(
         mode: mode, engine: session.settings.browsing.searchEngine, tabs: session.tabSuggestions,
-        history: session.services.history, bookmarks: session.services.bookmarks
+        history: session.services.history, bookmarks: session.services.bookmarks,
+        commands: CurioCommand.palette.filter { !$0.needsSplitView || session.splitAvailable }
     )
     var onExecute: ((CommandTarget) -> Void)?
     var onDismiss: (() -> Void)?

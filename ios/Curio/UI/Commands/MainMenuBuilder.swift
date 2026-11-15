@@ -67,7 +67,7 @@ struct MainMenuBuilder {
         ]), atStartOfMenu: .view)
         let history = menu("History", "history", [.goBack, .goForward, .showHistory, .showDownloads, .toggleBookmark])
         let tabs = menu("Tabs", "tabs", [
-            .pinTab, .addFavorite, .newGroupFromTab, .nextTab, .previousTab,
+            .pinTab, .addFavorite, .newFolder, .newGroupFromTab, .splitView, .separateSplitView, .nextTab, .previousTab,
             .selectTab1, .selectTab2, .selectTab3, .selectTab4, .selectTab5, .selectTab6, .selectTab7, .selectTab8, .selectLastTab,
         ])
         let spaces = menu("Spaces", "spaces", [

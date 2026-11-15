@@ -12,6 +12,8 @@ final class StripTabView: TapControl, ThemeObserving, UIDragInteractionDelegate 
     private var pointerInside = false
     var onClose: (() -> Void)?
     var menuProvider: (() -> UIMenu)?
+    /// A drag of this tab began (`true`) or ended.
+    var onDrag: ((Bool) -> Void)?
 
     init(model: TabViewModel, groupColor: UIColor?) {
         tabID = model.id
@@ -100,5 +102,13 @@ final class StripTabView: TapControl, ThemeObserving, UIDragInteractionDelegate 
         let item = UIDragItem(itemProvider: NSItemProvider())
         item.localObject = SidebarDragBox(.tab(tabID))
         return [item]
+    }
+
+    func dragInteraction(_ interaction: UIDragInteraction, sessionWillBegin session: UIDragSession) {
+        onDrag?(true)
+    }
+
+    func dragInteraction(_ interaction: UIDragInteraction, session: UIDragSession, didEndWith operation: UIDropOperation) {
+        onDrag?(false)
     }
 }

@@ -9,6 +9,8 @@ final class TabStripView: UIView, UIDropInteractionDelegate {
     private let endZone = UIView()
     var onCommand: ((CurioCommand) -> Void)?
     var onAskAboutTab: ((UUID) -> Void)?
+    /// A tab drag began or ended (the page shows split drop zones).
+    var onTabDrag: ((Bool) -> Void)?
 
     init(session: BrowserSession) {
         self.session = session
@@ -106,22 +108,44 @@ final class TabStripView: UIView, UIDropInteractionDelegate {
         guard let model = session.tabViewModel(id) else { return nil }
         let view = StripTabView(model: model, groupColor: groupColor)
         view.addAction(UIAction { [weak session] _ in session?.activateTab(id) }, for: .primaryActionTriggered)
-        view.onClose = { [weak session] in session?.closeTab(id) }
+        view.onClose = { [weak session] in session?.unloadOrArchiveTab(id) }
+        view.onDrag = { [weak self] in self?.onTabDrag?($0) }
         view.menuProvider = { [weak self] in
             guard let self else { return UIMenu() }
             let session = session
             return UIMenu(children: [
+                Self.splitMenu(id, session: session),
                 UIMenu(options: .displayInline, children: [
                     UIAction(title: "Pin Tab", image: Icon.star.image()) { _ in session.togglePin(id) },
                     UIAction(title: "Add to Favorites", image: Icon.heart.image()) { _ in session.addFavorite(id) },
                     UIAction(title: "Ask Curio About This Tab", image: Icon.sparkles.image()) { [weak self] _ in self?.onAskAboutTab?(id) },
                 ]),
-                UIAction(title: "Close Tab", image: Icon.close.image(), attributes: .destructive) { _ in session.closeTab(id) },
+                UIMenu(options: .displayInline, children: session.isSaved(id) ? [
+                    UIAction(title: "Unload Tab", image: Icon.minus.image()) { _ in session.unloadTab(id) },
+                    UIAction(title: "Delete Tab", image: Icon.trash.image(), attributes: .destructive) { _ in session.closeTab(id) },
+                ] : [
+                    UIAction(title: "Close Tab", image: Icon.close.image(), attributes: .destructive) { _ in session.closeTab(id) },
+                ]),
             ])
         }
         view.addInteraction(UIDropInteraction(delegate: self))
         stack.addArrangedSubview(view)
         return view
+    }
+
+    /// A strip tab's split items: its split's, or Open in Split View for a
+    /// tab beside the active one.
+    private static func splitMenu(_ id: UUID, session: BrowserSession) -> UIMenu {
+        guard session.splitAvailable else { return UIMenu(options: .displayInline, children: []) }
+        if let split = session.split(of: id), split.contains(session.activeTabID ?? id) || session.activeTabID == nil {
+            return SidebarMenus.splitItems(id, split: split.id, session: session)
+        }
+        guard let active = session.activeTabID, active != id, session.workspace.spaceOfTab(active) != nil else {
+            return UIMenu(options: .displayInline, children: [])
+        }
+        return UIMenu(options: .displayInline, children: [
+            UIAction(title: "Open in Split View", image: Icon.columns.image()) { _ in session.splitWith(id, before: false) },
+        ])
     }
 
     /// Updates one tab's title, icon and loading state in place.

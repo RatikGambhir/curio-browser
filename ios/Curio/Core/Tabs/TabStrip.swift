@@ -3,17 +3,23 @@ import Foundation
 /// The tabs and groups of one space, in two sections (pinned and regular).
 /// Every operation uses identity-based placement, so drag and drop never acts
 /// on stale indices. Groups never nest.
+///
+/// Tabs can also be shown together in a `TabSplit` (split view). A split's
+/// tabs always sit next to each other, in pane order, in one container (the
+/// pinned section, the regular section or one folder), and moving any of
+/// them moves the whole split, so a split lives in exactly one place.
 nonisolated struct TabStrip: Equatable, Sendable {
     private(set) var tabsByID: [UUID: Tab] = [:]
     private(set) var groupsByID: [UUID: TabGroup] = [:]
     private var pinned: [TabItem] = []
     private var unpinned: [TabItem] = []
+    private(set) var splitsByID: [UUID: TabSplit] = [:]
 
     init() {}
 
     /// Rebuilds a strip from persisted parts, dropping dangling references so
     /// a corrupted file can never produce an inconsistent strip.
-    init(tabs: [Tab], groups: [TabGroup], pinned: [TabItem], unpinned: [TabItem]) {
+    init(tabs: [Tab], groups: [TabGroup], pinned: [TabItem], unpinned: [TabItem], splits: [TabSplit] = []) {
         let tabs = Dictionary(tabs.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         var groups = Dictionary(groups.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         var seen = Set<UUID>()
@@ -43,6 +49,12 @@ nonisolated struct TabStrip: Equatable, Sendable {
             return nil
         })
         self.unpinned.append(contentsOf: groups.keys.filter { !referenced.contains($0) }.map(TabItem.group))
+        // Older sessions may have saved the new tab page as a tab's home.
+        for tab in tabs.values where tab.homeURL == Curio.newTabURL {
+            syncHome(tab.id)
+        }
+        splitsByID = Dictionary(splits.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        repairSplits()
     }
 
     // MARK: - Lookup
@@ -104,6 +116,47 @@ nonisolated struct TabStrip: Equatable, Sendable {
 
     func isPinned(_ id: UUID) -> Bool { location(of: id)?.section == .pinned }
 
+    /// Whether a tab is kept when closed: pinned tabs and tabs in a folder.
+    /// Closing a saved tab unloads it and resets it to its home URL.
+    func isSaved(_ id: UUID) -> Bool {
+        guard let location = location(of: id) else { return false }
+        return location.section == .pinned || location.group != nil
+    }
+
+    /// Where a new tab opened from `anchor` goes: right after it when it's a
+    /// regular tab, right after its folder when it's in a regular folder, and
+    /// at the top of the regular section otherwise. New tabs never land inside
+    /// a folder or in the pinned section.
+    func placementForNewTab(anchor: UUID?) -> TabPlacement {
+        // A tab opened from a split goes after the whole split.
+        let anchor = anchor.map { split(of: $0)?.tabs.last ?? $0 }
+        guard let anchor, let location = location(of: anchor), location.section == .unpinned else {
+            return .sectionStart(.unpinned)
+        }
+        if let group = location.group { return .afterGroup(group) }
+        return .afterTab(anchor)
+    }
+
+    /// Updates a tab's current URL. A saved tab without a home (one that was
+    /// showing the new tab page) takes its first real page as its home.
+    @discardableResult
+    mutating func setTabURL(_ id: UUID, _ url: String) -> Bool {
+        guard let tab = tabsByID[id], tab.url != url else { return false }
+        tabsByID[id]?.url = url
+        if tab.homeURL == nil { syncHome(id) }
+        return true
+    }
+
+    /// Saved tabs remember their first page, skipping the new tab page. A tab
+    /// that leaves the pinned section and every folder forgets its home.
+    private mutating func syncHome(_ id: UUID) {
+        let saved = isSaved(id)
+        guard var tab = tabsByID[id] else { return }
+        if !saved || tab.homeURL == Curio.newTabURL { tab.homeURL = nil }
+        if saved && tab.homeURL == nil && !tab.isNewTabPage && !tab.url.isEmpty { tab.homeURL = tab.url }
+        tabsByID[id] = tab
+    }
+
     // MARK: - Inserting and moving tabs
 
     /// Inserts a tab. If the placement refers to something that no longer
@@ -112,6 +165,8 @@ nonisolated struct TabStrip: Equatable, Sendable {
     mutating func insert(_ tab: Tab, at placement: TabPlacement) -> UUID {
         tabsByID[tab.id] = tab
         attach(tab.id, placement)
+        syncHome(tab.id)
+        repairSplits()
         return tab.id
     }
 
@@ -170,30 +225,41 @@ nonisolated struct TabStrip: Equatable, Sendable {
     /// Removes a tab, returning it with a placement to restore it later.
     mutating func remove(_ id: UUID) -> RemovedTab? {
         guard let restoreAt = detach(id), let tab = tabsByID.removeValue(forKey: id) else { return nil }
+        repairSplits()
         return RemovedTab(tab: tab, restoreAt: restoreAt)
     }
 
     /// Moves a tab. Moving a tab relative to itself is a no-op.
+    ///
+    /// Moving a tab that is part of a split moves the whole split: its first
+    /// pane goes to `placement` and the others follow it.
     @discardableResult
     mutating func move(_ id: UUID, to placement: TabPlacement) -> Bool {
         guard contains(id) else { return false }
+        let members = split(of: id)?.tabs ?? [id]
+        let id = members[0]
         switch placement {
         case .beforeTab(let anchor), .afterTab(let anchor):
-            if anchor == id { return false }
+            if members.contains(anchor) { return false }
         default:
             break
         }
         guard detach(id) != nil else { return false }
         attach(id, placement)
+        syncHome(id)
+        repairSplits()
         return true
     }
 
     /// Pins a tab: moves it out of any group to the end of the pinned section
-    /// and remembers its current URL as its home.
+    /// and remembers its current URL as its home (a blank tab gets its home on
+    /// its first navigation).
     @discardableResult
     mutating func pin(_ id: UUID) -> Bool {
         guard !isPinned(id) else { return false }
-        updateTab(id) { $0.homeURL = $0.url }
+        updateTab(id) { tab in
+            if !tab.isNewTabPage && !tab.url.isEmpty { tab.homeURL = tab.url }
+        }
         return move(id, to: .sectionEnd(.pinned))
     }
 
@@ -208,7 +274,8 @@ nonisolated struct TabStrip: Equatable, Sendable {
     // MARK: - Groups
 
     /// Creates a group where the first member is (or at the end of the regular
-    /// section) and moves the members into it.
+    /// section) and moves the members into it. A group may be empty, and stays
+    /// until it is deleted.
     @discardableResult
     mutating func createGroup(name: String, color: AccentColor, members: [UUID]) -> UUID {
         let group = TabGroup(name: name, color: color)
@@ -264,8 +331,13 @@ nonisolated struct TabStrip: Equatable, Sendable {
                 items.insert(contentsOf: group.tabs.map(TabItem.tab), at: index)
             }
         }
-        if keepTabs { return [] }
-        return group.tabs.compactMap { tabsByID.removeValue(forKey: $0) }
+        if keepTabs {
+            for tab in group.tabs { syncHome(tab) }
+            return []
+        }
+        let removed = group.tabs.compactMap { tabsByID.removeValue(forKey: $0) }
+        repairSplits()
+        return removed
     }
 
     /// Moves a group to a new top-level position.
@@ -314,29 +386,37 @@ nonisolated struct TabStrip: Equatable, Sendable {
                 items.append(.group(id))
             }
         }
+        // A folder dropped next to a split's inner tab would separate it.
+        repairSplits()
         return true
     }
 
-    /// Removes a group and its tabs so they can move to another space.
-    mutating func takeGroup(_ id: UUID) -> (group: TabGroup, tabs: [Tab], section: TabSection)? {
+    /// Removes a group with its tabs and the splits among them, so they can
+    /// move to another space.
+    mutating func takeGroup(_ id: UUID) -> TakenGroup? {
         guard let (section, index) = groupLocation(id) else { return nil }
         withItems(section) { _ = $0.remove(at: index) }
         guard let group = groupsByID.removeValue(forKey: id) else { return nil }
         let tabs = group.tabs.compactMap { tabsByID.removeValue(forKey: $0) }
-        return (group, tabs, section)
+        let inside = splitsByID.values.filter { split in split.tabs.contains { group.tabs.contains($0) } }.map(\.id)
+        let splits = inside.compactMap { splitsByID.removeValue(forKey: $0) }
+        repairSplits()
+        return TakenGroup(group: group, tabs: tabs, splits: splits, section: section)
     }
 
-    /// Adds a group with its tabs at the end of `section`.
+    /// Adds a group (with its tabs and splits) at the end of its section.
     @discardableResult
-    mutating func insertGroup(_ group: TabGroup, tabs: [Tab], section: TabSection) -> UUID {
-        var group = group
-        for tab in tabs {
+    mutating func insertGroup(_ taken: TakenGroup) -> UUID {
+        var group = taken.group
+        for tab in taken.tabs {
             if !group.tabs.contains(tab.id) { group.tabs.append(tab.id) }
             tabsByID[tab.id] = tab
         }
         group.tabs.removeAll { tabsByID[$0] == nil }
         groupsByID[group.id] = group
-        withItems(section) { $0.append(.group(group.id)) }
+        withItems(taken.section) { $0.append(.group(group.id)) }
+        for split in taken.splits { splitsByID[split.id] = split }
+        repairSplits()
         return group.id
     }
 
@@ -357,18 +437,30 @@ nonisolated struct TabStrip: Equatable, Sendable {
     /// Flattened rows for rendering. Tabs inside collapsed groups are hidden
     /// unless they are `alwaysShow` (the active tab stays visible under its
     /// collapsed folder, as in Arc).
-    func rows(alwaysShow: UUID?) -> [TabRow] {
+    ///
+    /// With `showingSplits`, a split is one `.split` row where its first tab
+    /// would be, and its other tabs get no row of their own. Without it (the
+    /// single-page layout), every pane is listed as an ordinary tab.
+    func rows(alwaysShow: UUID?, showingSplits: Bool = true) -> [TabRow] {
         var rows: [TabRow] = []
+        // The split the always-shown tab belongs to stays visible with it.
+        let alwaysSplit = alwaysShow.flatMap { split(of: $0)?.id }
+        func row(_ id: UUID, _ section: TabSection, _ group: UUID?) -> TabRow? {
+            guard showingSplits, let split = split(of: id) else { return .tab(id: id, section: section, group: group) }
+            return split.tabs.first == id ? .split(id: split.id, section: section, group: group) : nil
+        }
         for section in TabSection.allCases {
             for item in items(section) {
                 switch item {
                 case .tab(let id):
-                    rows.append(.tab(id: id, section: section, group: nil))
+                    if let row = row(id, section, nil) { rows.append(row) }
                 case .group(let groupID):
                     guard let group = groupsByID[groupID] else { continue }
                     rows.append(.group(id: groupID, section: section))
-                    for tab in group.tabs where !group.collapsed || tab == alwaysShow {
-                        rows.append(.tab(id: tab, section: section, group: groupID))
+                    for tab in group.tabs {
+                        let shown = !group.collapsed || tab == alwaysShow
+                            || (alwaysSplit != nil && split(of: tab)?.id == alwaysSplit)
+                        if shown, let row = row(tab, section, groupID) { rows.append(row) }
                     }
                 }
             }
@@ -384,12 +476,161 @@ nonisolated struct TabStrip: Equatable, Sendable {
         if index + 1 < order.count { return order[index + 1] }
         return index > 0 ? order[index - 1] : nil
     }
+
+    // MARK: - Split view
+
+    /// Every split, in no particular order.
+    var splits: [TabSplit] { Array(splitsByID.values) }
+
+    func split(_ id: UUID) -> TabSplit? { splitsByID[id] }
+
+    /// The split a tab is shown in, if any.
+    func split(of tab: UUID) -> TabSplit? {
+        // Splits are few (a handful per space), so a scan beats keeping a
+        // reverse index in sync.
+        splitsByID.values.first { $0.contains(tab) }
+    }
+
+    /// Shows `tabs` side by side. They are taken out of any split they were
+    /// in and gathered next to the first of them, in its section or folder.
+    /// Tabs the strip doesn't own are ignored; returns `nil` unless at least
+    /// two remain.
+    @discardableResult
+    mutating func createSplit(_ tabs: [UUID], orientation: SplitOrientation = .horizontal) -> UUID? {
+        let split = TabSplit(tabs: tabs.filter { contains($0) }, orientation: orientation)
+        guard split.isValid else { return nil }
+        for tab in split.tabs { detachFromSplit(tab) }
+        splitsByID[split.id] = split
+        repairSplits()
+        return split.id
+    }
+
+    /// Takes in a split made elsewhere (another space), keeping its id,
+    /// orientation and pane sizes. Its tabs must already be in this strip.
+    @discardableResult
+    mutating func adoptSplit(_ split: TabSplit) -> UUID? {
+        var split = split
+        split.tabs.removeAll { !contains($0) }
+        split.normalize()
+        guard split.isValid else { return nil }
+        for tab in split.tabs { detachFromSplit(tab) }
+        splitsByID[split.id] = split
+        repairSplits()
+        return splitsByID[split.id]?.id
+    }
+
+    /// Adds `tab` to a split as the pane at `index` (clamped to the end).
+    /// The tab leaves any other split and moves next to the split's other
+    /// tabs.
+    @discardableResult
+    mutating func addToSplit(_ id: UUID, tab: UUID, at index: Int) -> Bool {
+        guard contains(tab), let split = splitsByID[id], !split.isFull, !split.contains(tab) else { return false }
+        detachFromSplit(tab)
+        let added = splitsByID[id]?.addTab(tab, at: index) ?? false
+        repairSplits()
+        return added
+    }
+
+    /// Takes a tab out of its split and puts it right after the split. A
+    /// split left with one tab is dissolved.
+    @discardableResult
+    mutating func removeFromSplit(_ tab: UUID) -> Bool {
+        guard let last = detachFromSplit(tab) else { return false }
+        if last != tab { move(tab, to: .afterTab(last)) }
+        repairSplits()
+        return true
+    }
+
+    /// Dissolves a split; its tabs stay where they are as ordinary tabs.
+    @discardableResult
+    mutating func dissolveSplit(_ id: UUID) -> Bool {
+        splitsByID.removeValue(forKey: id) != nil
+    }
+
+    /// Moves the divider after pane `divider` (see `TabSplit.resize`).
+    @discardableResult
+    mutating func resizeSplit(_ id: UUID, divider: Int, by delta: Double) -> Bool {
+        splitsByID[id]?.resize(divider: divider, by: delta) ?? false
+    }
+
+    /// Gives every pane of a split the same room.
+    @discardableResult
+    mutating func equalizeSplit(_ id: UUID) -> Bool {
+        guard splitsByID[id] != nil else { return false }
+        splitsByID[id]?.equalize()
+        return true
+    }
+
+    /// Switches a split between side by side and stacked.
+    @discardableResult
+    mutating func flipSplit(_ id: UUID) -> Bool {
+        guard let split = splitsByID[id] else { return false }
+        splitsByID[id]?.orientation = split.orientation.flipped
+        return true
+    }
+
+    /// Takes a tab out of its split without moving it. Returns the split's
+    /// last remaining pane (or the tab itself when the split dissolved).
+    @discardableResult
+    private mutating func detachFromSplit(_ tab: UUID) -> UUID? {
+        guard let id = split(of: tab)?.id, var split = splitsByID[id] else { return nil }
+        split.removeTab(tab)
+        if split.isValid {
+            splitsByID[id] = split
+            return split.tabs.last
+        }
+        splitsByID.removeValue(forKey: id)
+        return split.tabs.last ?? tab
+    }
+
+    /// Keeps every split consistent with the strip: drops panes whose tabs
+    /// are gone (and splits left too small), a tab in two splits stays in the
+    /// first (by id order), and each split's tabs are gathered after its
+    /// first pane, in pane order, in the same section or folder.
+    private mutating func repairSplits() {
+        guard !splitsByID.isEmpty else { return }
+        let ids = splitsByID.keys.sorted { $0.uuidString < $1.uuidString }
+        var seen = Set<UUID>()
+        for id in ids {
+            guard var split = splitsByID[id] else { continue }
+            let before = split.tabs.count
+            split.tabs.removeAll { !(tabsByID[$0] != nil && seen.insert($0).inserted) }
+            if split.tabs.count != before { split.equalize() } else { split.normalize() }
+            splitsByID[id] = split.isValid ? split : nil
+        }
+        for id in ids {
+            guard let members = splitsByID[id]?.tabs, !isContiguous(members) else { continue }
+            for (previous, tab) in zip(members, members.dropFirst()) {
+                guard detach(tab) != nil else { continue }
+                attach(tab, .afterTab(previous))
+                syncHome(tab)
+            }
+        }
+    }
+
+    /// Whether `members` sit next to each other, in order, in one container.
+    private func isContiguous(_ members: [UUID]) -> Bool {
+        guard let first = members.first.flatMap(location(of:)) else { return false }
+        return members.enumerated().dropFirst().allSatisfy { offset, tab in
+            guard let location = location(of: tab) else { return false }
+            return location.section == first.section && location.group == first.group && location.index == first.index + offset
+        }
+    }
+}
+
+/// A group taken out of a strip with everything needed to put it in another
+/// one: its tabs and the splits among them.
+nonisolated struct TakenGroup: Equatable, Sendable {
+    var group: TabGroup
+    var tabs: [Tab]
+    var splits: [TabSplit]
+    var section: TabSection
 }
 
 // MARK: - Persistence
 
 nonisolated extension TabStrip: Codable {
-    private enum CodingKeys: String, CodingKey { case tabs, groups, pinned, unpinned }
+    private enum CodingKeys: String, CodingKey { case tabs, groups, pinned, unpinned, splits }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -397,7 +638,9 @@ nonisolated extension TabStrip: Codable {
             tabs: try c.decodeIfPresent([Tab].self, forKey: .tabs) ?? [],
             groups: try c.decodeIfPresent([TabGroup].self, forKey: .groups) ?? [],
             pinned: try c.decodeIfPresent([TabItem].self, forKey: .pinned) ?? [],
-            unpinned: try c.decodeIfPresent([TabItem].self, forKey: .unpinned) ?? []
+            unpinned: try c.decodeIfPresent([TabItem].self, forKey: .unpinned) ?? [],
+            // Older sessions have no splits; a damaged list loads as none.
+            splits: (try? c.decodeIfPresent([TabSplit].self, forKey: .splits)) ?? []
         )
     }
 
@@ -407,5 +650,6 @@ nonisolated extension TabStrip: Codable {
         try c.encode(Array(groupsByID.values), forKey: .groups)
         try c.encode(pinned, forKey: .pinned)
         try c.encode(unpinned, forKey: .unpinned)
+        try c.encode(splitsByID.values.sorted { $0.id.uuidString < $1.id.uuidString }, forKey: .splits)
     }
 }

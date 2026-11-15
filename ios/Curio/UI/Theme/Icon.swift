@@ -75,6 +75,10 @@ enum Icon: String {
     case textMagnify = "text.magnifyingglass"
     case info = "info.circle"
     case squareStack = "square.on.square"
+    case unlink = "rectangle.split.2x1.slash"
+    case stackPanes = "rectangle.split.1x2"
+    case equalPanes = "equal.square"
+    case separatePanes = "rectangle.on.rectangle.slash"
 
     func image(_ size: CGFloat = 14, weight: UIImage.SymbolWeight = .medium) -> UIImage? {
         UIImage(systemName: rawValue, withConfiguration: UIImage.SymbolConfiguration(pointSize: size, weight: weight))

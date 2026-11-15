@@ -62,6 +62,10 @@ nonisolated enum PageScripts {
       }
       window.addEventListener('load', reportMeta, { once: true });
 
+      // A press anywhere in the page focuses its pane in a split view. It
+      // carries no page data.
+      document.addEventListener('pointerdown', () => send('focus'), { capture: true, passive: true });
+
       // Scroll position, so sleeping tabs come back where they were.
       let scrollTimer = 0;
       window.addEventListener('scroll', () => {

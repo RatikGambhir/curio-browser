@@ -9,6 +9,8 @@ nonisolated enum SidebarItem: Hashable, Sendable {
     case header(UUID)
     case tab(UUID)
     case group(UUID)
+    /// A split view, by its split id: one row for all its panes.
+    case split(UUID)
     /// The pinned/regular boundary and the New Tab row.
     case divider
     /// The hint shown in an empty space.

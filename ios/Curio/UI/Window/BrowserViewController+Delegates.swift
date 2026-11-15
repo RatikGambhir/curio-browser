@@ -24,9 +24,9 @@ extension BrowserViewController: BrowserSessionDelegate {
             if id == session.activeTabID {
                 refreshBars()
                 page.refreshOverlays()
-                if page.view.window != nil, session.activeLiveTab?.webView?.superview == nil, !(session.activeTab?.isNewTabPage ?? true) {
-                    page.showActiveTab()
-                }
+            }
+            if page.view.window != nil, session.visibleTabIDs.contains(id) {
+                page.refreshPane(id)
             }
         case .space(let direction):
             applyTheme(animated: true)
@@ -34,6 +34,8 @@ extension BrowserViewController: BrowserSessionDelegate {
             if !verticalTabs { tabStrip.reload() }
         case .selection:
             page.refreshOverlays()
+        case .split:
+            page.refreshSplitLayout()
         case .downloads:
             sidebar.reload(animated: false, reconfigure: false)
             if libraryOpen { library.reload() }
@@ -112,22 +114,12 @@ extension BrowserViewController: SidebarDelegate {
         presentFromTop(alert)
     }
 
-    func sidebarRenameGroup(_ id: UUID) {
-        let current = session.workspace.activeSpace.strip.group(id)?.name ?? ""
-        let alert = UIAlertController(title: "Rename Group", message: nil, preferredStyle: .alert)
-        alert.addTextField { field in
-            field.text = current
-            field.placeholder = "Group name"
-            field.autocapitalizationType = .words
-            field.clearButtonMode = .whileEditing
-        }
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        let rename = UIAlertAction(title: "Rename", style: .default) { [weak self, weak alert] _ in
-            self?.session.renameGroup(id, to: alert?.textFields?.first?.text ?? "")
-        }
-        alert.addAction(rename)
-        alert.preferredAction = rename
-        presentFromTop(alert)
+    func sidebarNewFolder() {
+        newFolder()
+    }
+
+    func sidebarRenameFolder(_ id: UUID) {
+        beginFolderRename(id)
     }
 
     func sidebarAskAboutTab(_ id: UUID) {
@@ -149,6 +141,10 @@ extension BrowserViewController: SidebarDelegate {
 
     func sidebarOpenSettings() {
         openSettings(nil)
+    }
+
+    func sidebarTabDrag(active: Bool) {
+        page.setDropZonesActive(active)
     }
 }
 

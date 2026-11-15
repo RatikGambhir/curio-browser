@@ -2,7 +2,7 @@
 
 | | |
 | --- | --- |
-| **iOS status** | Not started |
+| **iOS status** | Built on iOS |
 | **Built on desktop** | 2026-11-10, branch `feature/folders` (after commit `3022174`) |
 | **Ticket** | |
 
@@ -95,14 +95,16 @@ made in, and to the folder it was made in, and is saved with the session.
   first.
 - **Reopen closed tab** brings back the tab but not its split.
 - **Empty pane:** a Split View pane starts on the new tab page; dismissing
-  the command bar leaves it there.
+  the command bar leaves it there. If the pane is pinned or in a folder,
+  its first navigation sets its home URL for later unloads.
 
 ## Requirements
 
 ### Functional
 
-- [ ] Show 2–4 tabs of one space side by side or stacked, each with its own
-      live web view.
+- [ ] On iPad and on the iPhone Duo inner display, show 2–4 tabs of one
+      space side by side or stacked when the page area can fit the panes,
+      each with its own live web view.
 - [ ] The space's active tab is the focused pane; every other pane is
       visible but not focused.
 - [ ] Only the panes of the visible split keep their web views shown;
@@ -204,19 +206,34 @@ Tests that define the behavior:
 - `curio-browser/src/ipc.rs`: `focus_messages_need_the_token`
 - `curio-ui/src/window/split.rs`: `divider_fraction_ignores_the_gaps`
 
+## iOS implementation
+
+| File | What it does |
+| --- | --- |
+| `Core/Tabs/TabSplit.swift` | `TabSplit`, `SplitOrientation`: equal panes, add/remove a pane, resize with the 15% minimum, normalize sizes |
+| `Core/Tabs/TabStrip.swift` | Splits in the strip: `createSplit`, `addToSplit`, `removeFromSplit`, `dissolveSplit`, `resizeSplit`, `flipSplit`, `equalizeSplit`, `adoptSplit`, `split(of:)`, `.split` rows, `repairSplits`, whole-split moves, `TakenGroup`; saved as `splits` in each strip of `workspace.json` |
+| `Core/Spaces/Workspace.swift` | `moveTab(_:toSpace:)` moves a whole split; `closeTab` focuses the pane beside |
+| `Session/SplitRoom.swift` | Whether the page area can show a split (240pt per side-by-side pane, 180pt per stacked pane) and the divider math |
+| `Session/BrowserSession.swift` | Visible panes stay awake, the split commands, drop handling, unloading a pane, focusing a pane |
+| `Browser/PageScripts.swift`, `BrowserTab.swift` | The bridge's `focus` message |
+| `UI/Page/SplitContainerView.swift`, `PaneView.swift`, `SplitDropOverlay.swift`, `PageViewController.swift` | Panes, dividers (44pt touch target, double-tap to equalize), pane headers and placeholders, drop zones |
+| `UI/Sidebar/SplitRowCell.swift`, `SidebarViewController.swift`, `SidebarMenus.swift` | The split row, its segment menus, Open in Split View |
+| `UI/Commands/CurioCommand.swift`, `MainMenuBuilder.swift`, `BrowserViewController+Commands.swift` | `SplitView` (⌃⇧=) and `SeparateSplitView` (⌃⇧-), hidden and disabled while no split fits |
+| `CurioTests/SplitViewTests.swift` | The desktop tests above, ported |
+
 ## iOS notes
 
-- **Wide layout (iPad, unfolded foldable):** build the full feature. Panes
-  side by side (or stacked) inside the page area, with a draggable gap
-  between them. Each pane is its own `WKWebView`; only the visible split's
-  web views are in the view hierarchy.
-- **Narrow layout (iPhone, Slide Over, compact width):** two panes of a
-  phone-width page aren't usable side by side. Show the split **stacked**
-  (top/bottom) regardless of its saved orientation, limited to the first
-  two panes in view with a pane switcher for the rest, or show only the
-  focused pane with a segmented control for the others. Don't change the
-  saved orientation when doing this; it's a display choice. Decide which
-  (see Open questions).
+- **Availability:** enable Split View on iPad and on the iPhone Duo inner
+  display when the page area has room for the panes. Check the available
+  page area after accounting for the sidebar and assistant. Regular iPhones
+  use the single-page layout in portrait and landscape, including when
+  landscape uses Curio's wide layout.
+- **Single-page layout:** on the iPhone Duo outer display or when an iPad
+  or iPhone Duo window becomes too small, show the focused tab and list
+  the panes as individual tabs. Hide Split View menu items, command bar
+  actions and split drop zones, and disable its keyboard shortcuts. Keep
+  the split, pane sizes and orientation saved. Restore the split when the
+  page area can fit it again and a member tab is active.
 - **Touch instead of hover and right-click:** the split row's segments get
   the tab context menu on long press, with the split items first. Drag the
   gap with a pan gesture (make the hit target at least 44pt even though the
@@ -256,13 +273,18 @@ Tests that define the behavior:
       dissolves into a normal tab.
 - [ ] A fifth pane and favorites are refused with the messages above.
 - [ ] Relaunching restores every split, its sizes and orientation.
-- [ ] Works in narrow and wide layouts and when the width changes.
+- [ ] Split View is available on iPad and on the iPhone Duo inner display
+      when the page area can fit the panes. Regular iPhones in portrait and
+      landscape and the iPhone Duo outer display show the single-page
+      layout without Split View controls or shortcuts.
+- [ ] Resizing an iPad window or folding an iPhone Duo shows the focused
+      tab when the split no longer fits. Widening the window or unfolding
+      restores the split with its saved pane sizes and orientation.
 - [ ] Light and dark themes, Dynamic Type, VoiceOver labels ("Split view:
       <title> and <title>"), Reduce Motion.
 - [ ] Unit tests ported for the logic (match the Rust tests above).
 
 ## Open questions
 
-- Narrow layout: stacked panes, or one pane at a time with a switcher?
 - Should reopening a closed pane put it back into its split? Desktop
   doesn't yet.

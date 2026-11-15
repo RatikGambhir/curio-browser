@@ -292,6 +292,8 @@ final class BrowserViewController: UIViewController, ThemeObserving {
         bottomBar.onCommand = command
         tabStrip.onCommand = command
         tabStrip.onAskAboutTab = { [weak self] in self?.sidebarAskAboutTab($0) }
+        tabStrip.onTabDrag = { [weak self] dragging in self?.page.setDropZonesActive(dragging) }
+        page.onSizeChange = { [weak self] _ in self?.updateSplitRoom() }
         bottomBar.moreButton.menu = moreMenu()
         drawerScrim.addAction(UIAction { [weak self] _ in self?.setDrawer(open: false) }, for: .touchUpInside)
         drawerScrim.accessibilityLabel = "Close Tabs"
