@@ -5,6 +5,7 @@ import Foundation
 nonisolated enum SidebarItem: Hashable, Sendable {
     /// A favorite tile, by its tab id.
     case favorite(UUID)
+    case addFavorite
     /// The active space's name row.
     case header(UUID)
     case tab(UUID)

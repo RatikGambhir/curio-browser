@@ -22,7 +22,7 @@ final class UserBubbleView: UIView {
         addSubview(chips)
         var views: [UIView] = message.context.prefix(6).map { ref in
             let favicon = FaviconView(size: 12)
-            favicon.configure(label: Curio.displayHost(ref.url), url: ref.faviconURL)
+            favicon.configure(label: Curio.displayHost(ref.url), url: ref.faviconURL, pageURL: ref.url)
             return ContextChipView(title: ref.title, leading: favicon, active: false, removable: false, tooltip: ref.url)
         }
         if message.context.count > 6 {

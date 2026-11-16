@@ -197,15 +197,18 @@ final class BrowserTab: NSObject {
 
     /// Fires for regular navigations and single-page-app URL changes.
     private func urlChanged(_ url: URL?) {
-        guard let url = url?.absoluteString, !url.isEmpty, url != state.url else { return }
-        let hostChanged = Curio.displayHost(url) != Curio.displayHost(state.url)
-        state.url = url
-        if hostChanged {
+        guard let url, !url.absoluteString.isEmpty, url.absoluteString != state.url else { return }
+        let oldURL = URL(string: state.url)
+        if (oldURL?.scheme, oldURL?.host(), oldURL?.port) != (url.scheme, url.host(), url.port) {
             state.favicon = nil
+        }
+        let hostChanged = Curio.displayHost(url.absoluteString) != Curio.displayHost(state.url)
+        state.url = url.absoluteString
+        if hostChanged {
             state.themeColor = nil
         }
         refreshHistory()
-        delegate?.tab(self, didNavigateTo: url)
+        delegate?.tab(self, didNavigateTo: state.url)
         delegate?.tabStateDidChange(self)
     }
 
@@ -227,14 +230,6 @@ final class BrowserTab: NSObject {
             delegate?.tabStateDidChange(self)
         }
     }
-
-    /// Falls back to the site's `/favicon.ico` when the page declares none.
-    private func defaultFavicon() -> String? {
-        guard let components = URLComponents(string: state.url), let scheme = components.scheme,
-              scheme.hasPrefix("http"), let host = components.host else { return nil }
-        let port = components.port.map { ":\($0)" } ?? ""
-        return "\(scheme)://\(host)\(port)/favicon.ico"
-    }
 }
 
 // MARK: - Page bridge
@@ -251,10 +246,15 @@ extension BrowserTab: WKScriptMessageHandler {
             state.selection = text.isEmpty ? nil : text
             delegate?.tabSelectionDidChange(self)
         case "meta":
-            if let favicon = body["favicon"] as? String, favicon.hasPrefix("http"), favicon.count < 2048 {
+            guard message.webView === webView, message.frameInfo.isMainFrame,
+                  let documentURL = body["url"] as? String,
+                  let expectedURL = webView?.url,
+                  URL(string: documentURL) == expectedURL else { return }
+            if let favicon = body["favicon"] as? String, favicon.count < 2048,
+               let scheme = URL(string: favicon)?.scheme?.lowercased(), scheme == "http" || scheme == "https" {
                 state.favicon = favicon
-            } else if state.favicon == nil {
-                state.favicon = defaultFavicon()
+            } else {
+                state.favicon = nil
             }
             state.themeColor = (body["themeColor"] as? String).map { String($0.prefix(64)) }
             delegate?.tabStateDidChange(self)
@@ -322,7 +322,9 @@ extension BrowserTab: WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        state.favicon = nil
         urlChanged(webView.url)
+        delegate?.tabStateDidChange(self)
         if reportsFocus { applyReportsFocus() }
     }
 
@@ -336,7 +338,6 @@ extension BrowserTab: WKNavigationDelegate {
             restoreScroll = nil
             webView.evaluateJavaScript(PageScripts.restoreScroll(y), in: nil, in: engine.world)
         }
-        if state.favicon == nil { state.favicon = defaultFavicon() }
         delegate?.tab(self, didNavigateTo: state.url)
         delegate?.tab(self, didFinishLoading: state.url, title: state.title)
         delegate?.tabStateDidChange(self)

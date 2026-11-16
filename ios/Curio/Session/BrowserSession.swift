@@ -67,6 +67,7 @@ final class BrowserSession {
         return TabViewModel(
             id: id,
             title: tab.displayTitle,
+            url: tab.url,
             favicon: tab.faviconURL,
             active: workspace.activeTabID == id,
             pinned: workspace.activeSpace.strip.isPinned(id),
@@ -940,8 +941,8 @@ extension BrowserSession: BrowserTabDelegate {
                     changed = true
                     titleChanged = true
                 }
-                if let favicon = state.favicon, model.faviconURL != favicon {
-                    model.faviconURL = favicon
+                if model.faviconURL != state.favicon {
+                    model.faviconURL = state.favicon
                     changed = true
                 }
             }

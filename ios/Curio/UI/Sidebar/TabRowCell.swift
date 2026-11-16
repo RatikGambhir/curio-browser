@@ -48,7 +48,7 @@ final class TabRowCell: UICollectionViewListCell {
         row.titleWeight = model.active ? .medium : .regular
         row.setLeadingInset(grouped ? 22 : 8)
         row.setSpacing(10)
-        favicon.configure(label: model.title, url: model.favicon, loading: model.loading)
+        favicon.configure(label: model.title, url: model.favicon, pageURL: model.url, loading: model.loading)
         favicon.alpha = model.asleep && !model.active && !model.pinned ? 0.65 : 1
         let closeLabel = Self.closeLabel(model)
         closeButton.setIcon(model.unloads ? .minus : .close, label: closeLabel)

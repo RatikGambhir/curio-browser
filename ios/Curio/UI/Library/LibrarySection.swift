@@ -50,7 +50,7 @@ enum LibrarySection: CaseIterable {
 
     var emptyCopy: (title: String, description: String) {
         switch self {
-        case .media: ("No media yet", "Images and videos you download show up here.")
+        case .media: ("No media yet", "Images and videos from Photos and Files › Curio show up here.")
         case .downloads: ("No downloads yet", "Files you download show up here.")
         case .notes: ("No notes yet", "Notes you write will live here.")
         case .spaces: ("No spaces yet", "Create a space to organize your tabs.")

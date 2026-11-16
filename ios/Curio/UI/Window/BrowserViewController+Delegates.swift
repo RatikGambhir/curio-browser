@@ -38,10 +38,11 @@ extension BrowserViewController: BrowserSessionDelegate {
             page.refreshSplitLayout()
         case .downloads:
             sidebar.reload(animated: false, reconfigure: false)
-            if libraryOpen { library.reload() }
+            if libraryOpen { library.reloadDownloads() }
             var top = presentedViewController
             while let current = top {
                 ((current as? UINavigationController)?.topViewController as? DownloadsViewController)?.reload()
+                (current as? LibraryViewController)?.reloadDownloads()
                 top = current.presentedViewController
             }
         }
@@ -178,26 +179,43 @@ extension BrowserViewController: LibraryDelegate {
         }
     }
 
-    func libraryPreview(_ url: URL) {
+    func librarySheetDidSelect(_ section: LibrarySection) {
+        library.select(section)
+    }
+
+    func libraryPreview(_ url: URL, retaining export: MediaExport?) {
         let preview = QLPreviewController()
-        let source = PreviewSource(url: url)
+        let source = PreviewSource(url: url, export: export) { [weak self] in self?.previewSource = nil }
         previewSource = source
         preview.dataSource = source
-        presentFromTop(preview)
+        let sheet = SheetStyle.wrap(preview, compact: isCompact, size: CGSize(width: 640, height: 720))
+        preview.navigationItem.leftBarButtonItem = UIBarButtonItem(title: "Close", primaryAction: UIAction { [weak sheet, weak source] _ in
+            sheet?.dismiss(animated: true) { source?.didDismiss() }
+        })
+        sheet.presentationController?.delegate = source
+        presentFromTop(sheet)
     }
 }
 
 /// Feeds one file to Quick Look.
-final class PreviewSource: NSObject, QLPreviewControllerDataSource {
-    let url: URL
+final class PreviewSource: NSObject, QLPreviewControllerDataSource, UIAdaptivePresentationControllerDelegate {
+    private let url: URL
+    private let export: MediaExport?
+    let didDismiss: () -> Void
 
-    init(url: URL) {
+    init(url: URL, export: MediaExport?, didDismiss: @escaping () -> Void) {
         self.url = url
+        self.export = export
+        self.didDismiss = didDismiss
     }
 
     func numberOfPreviewItems(in controller: QLPreviewController) -> Int { 1 }
 
     func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> QLPreviewItem {
         url as NSURL
+    }
+
+    func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {
+        didDismiss()
     }
 }

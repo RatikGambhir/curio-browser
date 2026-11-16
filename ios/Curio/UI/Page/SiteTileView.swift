@@ -16,7 +16,7 @@ final class SiteTileView: TapControl, ThemeObserving {
         box.layer.borderWidth = 1
         box.isUserInteractionEnabled = false
         box.addSubview(favicon)
-        favicon.configure(label: Curio.displayHost(url), url: iconURL)
+        favicon.configure(label: Curio.displayHost(url), url: iconURL, pageURL: url)
         label.text = title
         label.font = CurioFont.xs()
         label.textAlignment = .center

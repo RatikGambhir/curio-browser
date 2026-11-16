@@ -51,6 +51,7 @@ nonisolated enum PageScripts {
         const usable = icons.filter((l) => l.href && score(l) >= 0).sort((a, b) => score(b) - score(a));
         const theme = document.querySelector('meta[name="theme-color"]');
         send('meta', {
+          url: location.href,
           favicon: usable.length ? usable[0].href : null,
           themeColor: theme ? theme.content : null,
         });
