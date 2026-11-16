@@ -163,6 +163,21 @@ nonisolated struct Workspace: Equatable, Sendable {
         }
     }
 
+    /// Updates a tab's current URL wherever it lives. Saved tabs without a
+    /// home take their first real page as home.
+    @discardableResult
+    mutating func setTabURL(_ id: UUID, _ url: String) -> Bool {
+        if let index = favorites.firstIndex(where: { $0.tab.id == id }) {
+            guard favorites[index].tab.url != url else { return false }
+            favorites[index].tab.url = url
+            return true
+        }
+        for index in spaces.indices where spaces[index].strip.contains(id) {
+            return spaces[index].strip.setTabURL(id, url)
+        }
+        return false
+    }
+
     /// The space that owns a tab, unless it is a favorite.
     func spaceOfTab(_ id: UUID) -> UUID? {
         spaces.first { $0.strip.contains(id) }?.id
@@ -181,20 +196,13 @@ nonisolated struct Workspace: Equatable, Sendable {
         return id
     }
 
-    /// Opens a tab in the active space next to the active tab when it is a
-    /// regular tab, or at the top of the regular section otherwise.
+    /// Opens a tab in the active space near the active tab, but never inside
+    /// a folder or the pinned section (see `TabStrip.placementForNewTab`).
     @discardableResult
     mutating func openTabInActiveSpace(_ tab: Tab, activate: Bool) -> UUID {
-        openTab(tab, in: activeSpaceID, at: placementNearActive, activate: activate)
-        return tab.id
-    }
-
-    private var placementNearActive: TabPlacement {
         let space = activeSpace
-        if let active = space.activeTab, space.strip.location(of: active)?.section == .unpinned {
-            return .afterTab(active)
-        }
-        return .sectionStart(.unpinned)
+        openTab(tab, in: space.id, at: space.strip.placementForNewTab(anchor: space.activeTab), activate: activate)
+        return tab.id
     }
 
     /// Activates a tab, switching to its space when needed. Favorites open in
@@ -209,12 +217,16 @@ nonisolated struct Workspace: Equatable, Sendable {
     }
 
     /// Closes a regular tab, remembering it for reopening. Returns the tab
-    /// that became active in its space.
-    mutating func closeTab(_ id: UUID) -> (space: UUID, nextActive: UUID?)? {
+    /// that became active in its space. Closing a pane of a split view shows
+    /// the pane beside it (the next one, or the previous one for the last).
+    /// With `remember` off, the tab is dropped without going to Archived Tabs.
+    mutating func closeTab(_ id: UUID, remember: Bool = true) -> (space: UUID, nextActive: UUID?)? {
         guard let spaceID = spaceOfTab(id), let index = spaceIndex(spaceID) else { return nil }
-        let next = spaces[index].strip.neighborForClose(id)
+        let strip = spaces[index].strip
+        let next = strip.split(of: id).flatMap { Self.paneBeside(id, in: $0) } ?? strip.neighborForClose(id)
         guard let removed = spaces[index].strip.remove(id) else { return nil }
         if spaces[index].activeTab == id { spaces[index].activeTab = next }
+        guard remember else { return (spaceID, spaces[index].activeTab) }
         closedTabs.insert(ClosedTab(space: spaceID, tab: removed.tab, restoreAt: removed.restoreAt, closedAt: .now), at: 0)
         if closedTabs.count > Self.closedTabLimit { closedTabs.removeLast(closedTabs.count - Self.closedTabLimit) }
         return (spaceID, spaces[index].activeTab)
@@ -267,18 +279,58 @@ nonisolated struct Workspace: Equatable, Sendable {
         return copy.id
     }
 
-    /// Moves a tab to the top of another space's regular section.
-    @discardableResult
-    mutating func moveTab(_ id: UUID, toSpace target: UUID) -> Bool {
-        guard let source = spaceOfTab(id), source != target, space(target) != nil,
-              let index = spaceIndex(source) else { return false }
-        let next = spaces[index].strip.neighborForClose(id)
-        guard let removed = spaces[index].strip.remove(id) else { return false }
-        if spaces[index].activeTab == id { spaces[index].activeTab = next }
-        return openTab(removed.tab, in: target, at: .sectionStart(.unpinned), activate: false) != nil
+    /// The pane next to `id` in its split: the next one, or the previous
+    /// one for the last pane.
+    static func paneBeside(_ id: UUID, in split: TabSplit) -> UUID? {
+        guard let index = split.tabs.firstIndex(of: id) else { return nil }
+        if index + 1 < split.tabs.count { return split.tabs[index + 1] }
+        return index > 0 ? split.tabs[index - 1] : nil
     }
 
-    /// Moves a whole group and its tabs to another space.
+    /// The tab after `id` in `order` that isn't in `skipping`, or else the
+    /// one before it.
+    private static func neighbor(of id: UUID, in order: [UUID], skipping: Set<UUID>) -> UUID? {
+        guard let index = order.firstIndex(of: id) else { return nil }
+        return order[(index + 1)...].first { !skipping.contains($0) } ?? order[..<index].last { !skipping.contains($0) }
+    }
+
+    /// Moves a tab to the top of another space's regular section. A tab in
+    /// a split view takes the whole split with it by default. Joining
+    /// another split moves only the selected pane.
+    @discardableResult
+    mutating func moveTab(_ id: UUID, toSpace target: UUID, includingSplit: Bool = true) -> Bool {
+        guard let source = spaceOfTab(id), source != target, space(target) != nil,
+              let index = spaceIndex(source) else { return false }
+        if !includingSplit {
+            guard let tab = spaces[index].strip.tab(id), closeTab(id, remember: false) != nil else { return false }
+            return openTab(tab, in: target, at: .sectionStart(.unpinned), activate: false) != nil
+        }
+        let split = spaces[index].strip.split(of: id)
+        let members = split?.tabs ?? [id]
+        // When the active tab leaves, the nearest tab outside the moved split
+        // takes over: the next one, or the previous one when it was last.
+        let order = spaces[index].strip.orderedTabIDs
+        let leavingActive = spaces[index].activeTab.flatMap { members.contains($0) ? $0 : nil }
+        var moved: [Tab] = []
+        for member in members {
+            guard let removed = spaces[index].strip.remove(member) else { continue }
+            moved.append(removed.tab)
+        }
+        if let leavingActive {
+            spaces[index].activeTab = Self.neighbor(of: leavingActive, in: order, skipping: Set(members))
+        }
+        guard !moved.isEmpty else { return false }
+        return updateSpace(target) { space in
+            var previous: UUID?
+            for tab in moved {
+                previous = space.strip.insert(tab, at: previous.map(TabPlacement.afterTab) ?? .sectionStart(.unpinned))
+            }
+            if let split { space.strip.adoptSplit(split) }
+        }
+    }
+
+    /// Moves a whole group and its tabs (with the splits among them) to
+    /// another space.
     @discardableResult
     mutating func moveGroup(_ group: UUID, from source: UUID, to target: UUID) -> Bool {
         guard source != target, space(target) != nil, let sourceIndex = spaceIndex(source),
@@ -286,7 +338,7 @@ nonisolated struct Workspace: Equatable, Sendable {
         if let active = spaces[sourceIndex].activeTab, taken.tabs.contains(where: { $0.id == active }) {
             spaces[sourceIndex].activeTab = spaces[sourceIndex].strip.orderedTabIDs.first
         }
-        return updateSpace(target) { $0.strip.insertGroup(taken.group, tabs: taken.tabs, section: taken.section) }
+        return updateSpace(target) { $0.strip.insertGroup(taken) }
     }
 
     /// Every tab with its owner: favorites first, then spaces in order.

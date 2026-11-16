@@ -21,7 +21,10 @@ nonisolated enum CurioCommand: String, CaseIterable, Sendable {
     case selectTab7 = "curio::SelectTab7"
     case selectTab8 = "curio::SelectTab8"
     case selectLastTab = "curio::SelectLastTab"
+    case newFolder = "curio::NewFolder"
     case newGroupFromTab = "curio::NewGroupFromTab"
+    case splitView = "curio::SplitView"
+    case separateSplitView = "curio::SeparateSplitView"
     case addFavorite = "curio::AddFavorite"
     case toggleBookmark = "curio::ToggleBookmark"
     case copyURL = "curio::CopyUrl"
@@ -85,7 +88,10 @@ nonisolated enum CurioCommand: String, CaseIterable, Sendable {
         case .selectTab7: ["secondary-7"]
         case .selectTab8: ["secondary-8"]
         case .selectLastTab: ["secondary-9"]
+        case .newFolder: ["alt-secondary-n"]
         case .newGroupFromTab: ["alt-secondary-g"]
+        case .splitView: ["ctrl-shift-="]
+        case .separateSplitView: ["ctrl-shift--"]
         case .toggleBookmark: ["shift-secondary-d"]
         case .copyURL: ["shift-secondary-c"]
         case .goBack: ["secondary-["]
@@ -150,7 +156,10 @@ nonisolated enum CurioCommand: String, CaseIterable, Sendable {
         case .selectTab1, .selectTab2, .selectTab3, .selectTab4, .selectTab5, .selectTab6, .selectTab7, .selectTab8:
             "Go to Tab \(rawValue.suffix(1))"
         case .selectLastTab: "Go to Last Tab"
-        case .newGroupFromTab: "New Group from Tab"
+        case .newFolder: "New Folder"
+        case .newGroupFromTab: "New Folder from Tab"
+        case .splitView: "Split View"
+        case .separateSplitView: "Separate Split View"
         case .addFavorite: "Add Tab to Favorites"
         case .toggleBookmark: "Bookmark Page"
         case .copyURL: "Copy URL"
@@ -200,7 +209,10 @@ nonisolated enum CurioCommand: String, CaseIterable, Sendable {
         case .addFavorite: .heart
         case .toggleBookmark: .book
         case .duplicateTab: .copy
+        case .newFolder: .folderPlus
         case .newGroupFromTab: .folder
+        case .splitView: .columns
+        case .separateSplitView: .separatePanes
         case .copyURL: .link
         case .reopenClosedTab: .undo
         case .closeTab, .stopLoading, .escape: .close
@@ -228,8 +240,13 @@ nonisolated enum CurioCommand: String, CaseIterable, Sendable {
     /// Commands listed in the command palette, in the desktop's order.
     static let palette: [CurioCommand] = [
         .newSpace, .toggleAIPanel, .askAboutPage, .newChat, .toggleSidebar, .toggleLibrary, .toggleTabLayout,
-        .pinTab, .addFavorite, .toggleBookmark, .duplicateTab, .newGroupFromTab, .copyURL, .reopenClosedTab,
+        .pinTab, .addFavorite, .toggleBookmark, .duplicateTab, .newFolder, .newGroupFromTab, .splitView, .separateSplitView,
+        .copyURL, .reopenClosedTab,
         .closeTab, .findInPage, .share, .print, .showHistory, .showDownloads, .openSettings, .zoomIn, .zoomOut, .zoomReset,
         .openDevTools, .nextSpace, .previousSpace,
     ]
+
+    /// Split view commands, offered only while the page area can show a
+    /// split (iPad and large unfolded displays).
+    var needsSplitView: Bool { self == .splitView || self == .separateSplitView }
 }

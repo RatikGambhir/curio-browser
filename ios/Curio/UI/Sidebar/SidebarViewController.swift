@@ -15,6 +15,8 @@ final class SidebarViewController: UIViewController, ThemeObserving {
     private var tabRows: [SidebarItem] = []
     private var lastSpace: UUID?
     private var swipeTranslation: CGFloat = 0
+    /// The folder whose name is being edited in its row.
+    private var renamingGroup: UUID?
     /// Narrow layouts use taller rows for touch.
     var compact = false {
         didSet { if compact != oldValue { reload(animated: false, reconfigure: true) } }
@@ -43,6 +45,8 @@ final class SidebarViewController: UIViewController, ThemeObserving {
         collectionView.dragInteractionEnabled = true
         collectionView.contentInset.top = topInset
         collectionView.alwaysBounceVertical = true
+        // Scrolling saves a folder name being edited, like tapping away.
+        collectionView.keyboardDismissMode = .onDrag
         collectionView.translatesAutoresizingMaskIntoConstraints = false
         footer.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(collectionView)
@@ -61,6 +65,9 @@ final class SidebarViewController: UIViewController, ThemeObserving {
         footer.settingsButton.addAction(UIAction { [weak self] _ in self?.delegate?.sidebarOpenSettings() }, for: .primaryActionTriggered)
         configureDataSource()
         addSpaceSwipe()
+        let tapAway = UITapGestureRecognizer(target: self, action: #selector(handleTapAway(_:)))
+        tapAway.cancelsTouchesInView = false
+        collectionView.addGestureRecognizer(tapAway)
         ThemeCenter.shared.observe(self)
         reload(animated: false)
     }
@@ -123,13 +130,20 @@ final class SidebarViewController: UIViewController, ThemeObserving {
             guard let self, let model = session.tabViewModel(id) else { return }
             let grouped = session.workspace.activeSpace.strip.location(of: id)?.group != nil
             cell.configure(model, grouped: grouped, height: rowHeight)
-            cell.onClose = { [weak self] model in
-                if model.pinned { self?.session.unloadTab(model.id) } else { self?.session.closeTab(model.id) }
-            }
+            cell.onClose = { [weak self] model in self?.closeButtonTapped(model) }
         }
         let groupCell = UICollectionView.CellRegistration<GroupRowCell, UUID> { [weak self] cell, _, id in
             guard let self, let group = session.workspace.activeSpace.strip.group(id) else { return }
-            cell.configure(group, height: rowHeight - 4)
+            cell.onCommitName = { [weak self] name in self?.finishFolderRename(id, name: name) }
+            cell.onCancelName = { [weak self] in self?.finishFolderRename(id, name: nil) }
+            cell.configure(group, height: rowHeight - 4, editing: renamingGroup == id)
+        }
+        let splitCell = UICollectionView.CellRegistration<SplitRowCell, UUID> { [weak self] cell, _, id in
+            guard let self, let split = session.workspace.activeSpace.strip.split(id) else { return }
+            let grouped = session.workspace.activeSpace.strip.location(of: split.tabs[0])?.group != nil
+            cell.configure(split.tabs.compactMap(session.tabViewModel), grouped: grouped, height: rowHeight)
+            cell.onSelect = { [weak self] tab, flags in self?.selectPane(tab, flags: flags) }
+            cell.onClose = { [weak self] tab in self?.session.closeOrUnloadTab(tab) }
         }
         let dividerCell = UICollectionView.CellRegistration<DividerCell, Bool> { [weak self] cell, _, hasPinned in
             cell.configure(hasPinned: hasPinned, height: self?.rowHeight ?? 36)
@@ -145,6 +159,8 @@ final class SidebarViewController: UIViewController, ThemeObserving {
                 return collectionView.dequeueConfiguredReusableCell(using: tabCell, for: indexPath, item: id)
             case .group(let id):
                 return collectionView.dequeueConfiguredReusableCell(using: groupCell, for: indexPath, item: id)
+            case .split(let id):
+                return collectionView.dequeueConfiguredReusableCell(using: splitCell, for: indexPath, item: id)
             case .divider:
                 let hasPinned = !(self?.session.workspace.activeSpace.strip.items(.pinned).isEmpty ?? true)
                 return collectionView.dequeueConfiguredReusableCell(using: dividerCell, for: indexPath, item: hasPinned)
@@ -162,13 +178,18 @@ final class SidebarViewController: UIViewController, ThemeObserving {
         guard isViewLoaded else { return }
         let workspace = session.workspace
         let space = workspace.activeSpace
+        if let renaming = renamingGroup, space.strip.group(renaming) == nil {
+            // The folder was deleted, moved or its space switched away.
+            renamingGroup = nil
+        }
         var snapshot = NSDiffableDataSourceSnapshot<SidebarSection, SidebarItem>()
         snapshot.appendSections(SidebarSection.allCases)
         snapshot.appendItems(workspace.favorites.map { .favorite($0.tab.id) }, toSection: .favorites)
         snapshot.appendItems([.header(space.id)], toSection: .header)
         var rows: [SidebarItem] = []
         var dividerDone = false
-        for row in space.strip.rows(alwaysShow: space.activeTab) {
+        // The single-page layout lists a split's panes as ordinary tabs.
+        for row in space.strip.rows(alwaysShow: space.activeTab, showingSplit: session.splitRoom.fits) {
             if row.section == .unpinned && !dividerDone {
                 rows.append(.divider)
                 dividerDone = true
@@ -176,6 +197,7 @@ final class SidebarViewController: UIViewController, ThemeObserving {
             switch row {
             case .tab(let id, _, _): rows.append(.tab(id))
             case .group(let id, _): rows.append(.group(id))
+            case .split(let id, _, _): rows.append(.split(id))
             }
         }
         if !dividerDone { rows.append(.divider) }
@@ -196,10 +218,104 @@ final class SidebarViewController: UIViewController, ThemeObserving {
     func refreshTab(_ id: UUID) {
         guard isViewLoaded else { return }
         var snapshot = dataSource.snapshot()
-        let items = [SidebarItem.tab(id), .favorite(id)].filter { snapshot.indexOfItem($0) != nil }
+        var candidates = [SidebarItem.tab(id), .favorite(id)]
+        if let split = session.workspace.activeSpace.strip.split(of: id) { candidates.append(.split(split.id)) }
+        let items = candidates.filter { snapshot.indexOfItem($0) != nil }
         guard !items.isEmpty else { return }
         snapshot.reconfigureItems(items)
         dataSource.apply(snapshot, animatingDifferences: false)
+    }
+
+    // MARK: - Folder rename
+
+    /// Turns a folder's row into a text field with the name selected,
+    /// scrolling it into view if needed.
+    func beginFolderRename(_ id: UUID) {
+        guard isViewLoaded, session.workspace.activeSpace.strip.group(id) != nil else { return }
+        if let current = renamingGroup, current != id { commitFolderRename() }
+        renamingGroup = id
+        var snapshot = dataSource.snapshot()
+        guard snapshot.indexOfItem(.group(id)) != nil else {
+            renamingGroup = nil
+            return
+        }
+        snapshot.reconfigureItems([.group(id)])
+        dataSource.apply(snapshot, animatingDifferences: false)
+        guard let indexPath = dataSource.indexPath(for: .group(id)) else { return }
+        collectionView.layoutIfNeeded()
+        let visible = collectionView.bounds.inset(by: collectionView.adjustedContentInset)
+        if let frame = collectionView.layoutAttributesForItem(at: indexPath)?.frame, !visible.contains(frame) {
+            collectionView.scrollToItem(at: indexPath, at: .centeredVertically, animated: false)
+        }
+    }
+
+    /// Saves the name being edited, if any (the field reports it on ending).
+    func commitFolderRename() {
+        guard renamingGroup != nil, isViewLoaded else { return }
+        collectionView.endEditing(true)
+    }
+
+    /// Cancels the rename in progress, keeping the old name. Returns `false`
+    /// when nothing was being renamed.
+    @discardableResult
+    func cancelFolderRename() -> Bool {
+        guard let id = renamingGroup else { return false }
+        finishFolderRename(id, name: nil)
+        return true
+    }
+
+    /// Ends a rename: saves `name` (blank keeps the old name), or just leaves
+    /// edit mode for `nil`.
+    private func finishFolderRename(_ id: UUID, name: String?) {
+        guard renamingGroup == id else { return }
+        renamingGroup = nil
+        if let name {
+            session.renameGroup(id, to: name)
+        } else {
+            var snapshot = dataSource.snapshot()
+            guard snapshot.indexOfItem(.group(id)) != nil else { return }
+            snapshot.reconfigureItems([.group(id)])
+            dataSource.apply(snapshot, animatingDifferences: false)
+        }
+    }
+
+    /// Tapping anywhere in the sidebar outside the name field saves it.
+    @objc private func handleTapAway(_ tap: UITapGestureRecognizer) {
+        guard let id = renamingGroup, tap.state == .ended else { return }
+        if let indexPath = dataSource.indexPath(for: .group(id)),
+           let cell = collectionView.cellForItem(at: indexPath) as? GroupRowCell,
+           cell.bounds.contains(tap.location(in: cell)) {
+            return
+        }
+        commitFolderRename()
+    }
+
+    // MARK: - Closing tabs
+
+    /// − unloads a saved tab's page; × closes the tab into Archived Tabs.
+    /// The session ignores the second tap of a double tap on −.
+    private func closeButtonTapped(_ model: TabViewModel) {
+        session.unloadOrArchiveTab(model.id)
+    }
+
+    /// A tap on a split row's segment focuses that pane; ⌘-tap attaches it
+    /// to the assistant instead.
+    private func selectPane(_ id: UUID, flags: UIKeyModifierFlags) {
+        if renamingGroup != nil { commitFolderRename() }
+        if flags.contains(.command) {
+            delegate?.sidebarAskAboutTab(id)
+            return
+        }
+        session.activateTab(id)
+        delegate?.sidebarDidActivateTab()
+    }
+
+    /// The sidebar row an item lives in: a split's tabs share their split's.
+    private func row(containing tab: UUID) -> SidebarItem {
+        if let split = session.workspace.activeSpace.strip.split(of: tab), tabRows.contains(.split(split.id)) {
+            return .split(split.id)
+        }
+        return .tab(tab)
     }
 
     /// Slides the tab list in from the direction of the new space.
@@ -248,12 +364,15 @@ final class SidebarViewController: UIViewController, ThemeObserving {
     private func trailingSwipeActions(at indexPath: IndexPath) -> UISwipeActionsConfiguration? {
         guard case .tab(let id) = dataSource.itemIdentifier(for: indexPath),
               let model = session.tabViewModel(id) else { return nil }
-        let action = UIContextualAction(style: model.pinned ? .normal : .destructive, title: model.pinned ? "Unload" : "Close") { [weak self] _, _, done in
-            self?.session.closeOrUnloadTab(id)
+        // Same as the row's button: unload a live saved tab, else close it.
+        let title = model.unloads ? "Unload" : (model.saved ? "Archive" : "Close")
+        let action = UIContextualAction(style: model.unloads ? .normal : .destructive, title: title) { [weak self] _, _, done in
+            self?.session.unloadOrArchiveTab(id)
             done(true)
         }
-        action.image = (model.pinned ? Icon.minus : Icon.close).image(13)
-        if model.pinned { action.backgroundColor = ThemeCenter.shared.theme.textMuted.uiColor }
+        action.image = (model.unloads ? Icon.minus : Icon.close).image(13)
+        action.accessibilityLabel = TabRowCell.closeLabel(model)
+        if model.unloads { action.backgroundColor = ThemeCenter.shared.theme.textMuted.uiColor }
         return UISwipeActionsConfiguration(actions: [action])
     }
 
@@ -275,7 +394,13 @@ final class SidebarViewController: UIViewController, ThemeObserving {
 extension SidebarViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         collectionView.deselectItem(at: indexPath, animated: false)
-        switch dataSource.itemIdentifier(for: indexPath) {
+        let item = dataSource.itemIdentifier(for: indexPath)
+        if let renaming = renamingGroup {
+            commitFolderRename()
+            // A tap on the folder being renamed only saves the name.
+            if item == .group(renaming) { return }
+        }
+        switch item {
         case .favorite(let id), .tab(let id):
             session.activateTab(id)
             delegate?.sidebarDidActivateTab()
@@ -290,15 +415,25 @@ extension SidebarViewController: UICollectionViewDelegate {
     }
 
     func collectionView(_ collectionView: UICollectionView, contextMenuConfigurationForItemsAt indexPaths: [IndexPath], point: CGPoint) -> UIContextMenuConfiguration? {
-        guard let indexPath = indexPaths.first, let item = dataSource.itemIdentifier(for: indexPath) else { return nil }
         let menus = menus
+        guard let indexPath = indexPaths.first, let item = dataSource.itemIdentifier(for: indexPath) else {
+            // Empty space below the tabs.
+            return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { _ in menus.emptyAreaMenu() }
+        }
         let menu: () -> UIMenu?
         switch item {
         case .favorite(let id): menu = { menus.favoriteMenu(tab: id) }
         case .tab(let id): menu = { menus.tabMenu(id) }
-        case .group(let id): menu = { menus.groupMenu(id) }
+        case .split(let id):
+            let cellPoint = collectionView.cellForItem(at: indexPath).map { collectionView.convert(point, to: $0) }
+            let cell = collectionView.cellForItem(at: indexPath) as? SplitRowCell
+            guard let tab = cellPoint.flatMap({ cell?.paneID(at: $0) }) ?? session.workspace.activeSpace.strip.split(id)?.tabs.first else { return nil }
+            menu = { menus.splitPaneMenu(tab, split: id) }
+        case .group(let id):
+            if id == renamingGroup { return nil }
+            menu = { menus.groupMenu(id) }
         case .header(let id): menu = { menus.spaceMenu(id) }
-        default: return nil
+        case .divider, .empty: menu = { menus.emptyAreaMenu() }
         }
         return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { _ in menu() }
     }
@@ -318,6 +453,12 @@ extension SidebarViewController: UICollectionViewDragDelegate, UICollectionViewD
         case .group(let id):
             drag = .group(id, space: self.session.workspace.activeSpaceID)
             provider = NSItemProvider()
+        case .split(let id):
+            // Dragging a split moves all of it (by its first pane).
+            guard let first = self.session.workspace.activeSpace.strip.split(id)?.tabs.first else { return [] }
+            drag = .tab(first)
+            let url = self.session.workspace.tab(first)?.url ?? ""
+            provider = URL(string: url).map { NSItemProvider(object: $0 as NSURL) } ?? NSItemProvider()
         default:
             return []
         }
@@ -361,7 +502,7 @@ extension SidebarViewController: UICollectionViewDragDelegate, UICollectionViewD
         }
         // The index is where the item lands once lifted out of its old place.
         let dragged: SidebarItem = switch box.drag {
-        case .tab(let id): .tab(id)
+        case .tab(let id): row(containing: id)
         case .group(let id, _): .group(id)
         }
         let rows = tabRows.filter { $0 != dragged }
@@ -370,6 +511,7 @@ extension SidebarViewController: UICollectionViewDragDelegate, UICollectionViewD
         case .tab(let id):
             let placement: TabPlacement = switch anchor {
             case .tab(let other): .beforeTab(other)
+            case .split(let split): session.workspace.activeSpace.strip.split(split)?.tabs.first.map(TabPlacement.beforeTab) ?? .sectionEnd(.unpinned)
             case .group(let group): .beforeGroup(group)
             case .divider: .sectionEnd(.pinned)
             default: .sectionEnd(.unpinned)
@@ -379,12 +521,23 @@ extension SidebarViewController: UICollectionViewDragDelegate, UICollectionViewD
             guard space == session.workspace.activeSpaceID else { return }
             let placement: GroupPlacement = switch anchor {
             case .tab(let other): .beforeItem(.tab(other))
+            case .split(let split): session.workspace.activeSpace.strip.split(split)?.tabs.first.map { GroupPlacement.beforeItem(.tab($0)) } ?? .sectionEnd(.unpinned)
             case .group(let group): .beforeItem(.group(group))
             case .divider: .sectionEnd(.pinned)
             default: .sectionEnd(.unpinned)
             }
             session.dropGroup(id, at: placement)
         }
+    }
+
+    func collectionView(_ collectionView: UICollectionView, dragSessionWillBegin session: UIDragSession) {
+        if (session.items.first?.localObject as? SidebarDragBox).map({ if case .tab = $0.drag { true } else { false } }) == true {
+            delegate?.sidebarTabDrag(active: true)
+        }
+    }
+
+    func collectionView(_ collectionView: UICollectionView, dragSessionDidEnd session: UIDragSession) {
+        delegate?.sidebarTabDrag(active: false)
     }
 
     func collectionView(_ collectionView: UICollectionView, dragPreviewParametersForItemAt indexPath: IndexPath) -> UIDragPreviewParameters? {

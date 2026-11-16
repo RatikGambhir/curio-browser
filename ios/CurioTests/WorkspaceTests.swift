@@ -156,4 +156,28 @@ final class WorkspaceTests: XCTestCase {
         XCTAssertEqual(decoded.activeSpaceID, workspace.activeSpaceID)
         XCTAssertEqual(decoded.activeTabID, workspace.activeTabID)
     }
+
+    func testANewTabFromAFolderTabOpensBelowTheFolder() {
+        var workspace = Workspace.firstRun()
+        let space = workspace.activeSpaceID
+        let ids = (0..<3).compactMap { workspace.openTab(Tab(url: "https://\($0).test"), in: space, at: .sectionEnd(.unpinned), activate: false) }
+        var folder: UUID?
+        workspace.updateActiveSpace { folder = $0.strip.createGroup(name: "Reading", color: .sage, members: [ids[0]]) }
+        workspace.activateTab(ids[0])
+
+        let new = workspace.openTabInActiveSpace(Tab(url: "https://new.test"), activate: true)
+        let strip = workspace.activeSpace.strip
+        XCTAssertEqual(strip.group(folder!)?.tabs, [ids[0]])
+        XCTAssertNil(strip.location(of: new)?.group)
+        XCTAssertEqual(strip.orderedTabIDs[1], new, "right below the folder")
+    }
+
+    func testSettingAFavoriteURLLeavesItsHome() {
+        var workspace = Workspace.firstRun()
+        let id = workspace.openTabInActiveSpace(Tab(url: "https://fav.test"), activate: true)
+        workspace.favoriteFromTab(id)
+        XCTAssertTrue(workspace.setTabURL(id, "https://other.test"))
+        XCTAssertEqual(workspace.tab(id)?.url, "https://other.test")
+        XCTAssertEqual(workspace.tab(id)?.homeURL, "https://fav.test")
+    }
 }

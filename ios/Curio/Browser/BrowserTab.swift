@@ -62,6 +62,21 @@ final class BrowserTab: NSObject {
         delegate?.tabStateDidChange(self)
     }
 
+    /// Whether a press in the page asks to focus its pane: only while it is
+    /// an unfocused pane of a visible split view.
+    private(set) var reportsFocus = false
+
+    func setReportsFocus(_ reports: Bool) {
+        guard reports != reportsFocus else { return }
+        reportsFocus = reports
+        applyReportsFocus()
+    }
+
+    /// The flag lives in the page's document, so a new document gets it again.
+    private func applyReportsFocus() {
+        webView?.evaluateJavaScript("window.__curioReportFocus = \(reportsFocus);", in: nil, in: engine.world)
+    }
+
     func setAppearance(_ style: UIUserInterfaceStyle) {
         appearance = style
         webView?.overrideUserInterfaceStyle = style
@@ -245,6 +260,8 @@ extension BrowserTab: WKScriptMessageHandler {
             delegate?.tabStateDidChange(self)
         case "scroll":
             if let y = body["y"] as? Double, y.isFinite { delegate?.tab(self, didScrollTo: y) }
+        case "focus":
+            delegate?.tabDidRequestFocus(self)
         default:
             break
         }
@@ -306,6 +323,7 @@ extension BrowserTab: WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         urlChanged(webView.url)
+        if reportsFocus { applyReportsFocus() }
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {

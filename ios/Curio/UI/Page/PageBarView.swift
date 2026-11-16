@@ -10,9 +10,17 @@ final class PageBarView: UIView, ThemeObserving {
     let address = AddressView(showsTitle: true)
     let assistantButton = IconButton(.sparkles, label: "Curio Assistant")
     let downloadsButton = IconButton(.download, label: "Downloads")
+    let removeFromSplitButton = IconButton(.unlink, label: "Remove from Split View")
     private let divider = DividerView()
     private var loading = false
     var onCommand: ((CurioCommand) -> Void)?
+    var onRemoveFromSplit: (() -> Void)?
+    /// Shown in the focused pane of a split view.
+    var showsRemoveFromSplit = false {
+        didSet { if showsRemoveFromSplit != oldValue { setNeedsLayout() } }
+    }
+    private var showsSidebarButton = true
+    private var appliedWidth: CGFloat = -1
 
     init() {
         super.init(frame: .zero)
@@ -20,7 +28,7 @@ final class PageBarView: UIView, ThemeObserving {
         spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
         let gap = UIView()
         gap.widthAnchor.constraint(equalToConstant: 6).isActive = true
-        let stack = UIStackView(arrangedSubviews: [sidebarButton, backButton, forwardButton, reloadButton, gap, address, spacer, assistantButton, downloadsButton])
+        let stack = UIStackView(arrangedSubviews: [sidebarButton, backButton, forwardButton, reloadButton, gap, address, spacer, removeFromSplitButton, assistantButton, downloadsButton])
         stack.spacing = 2
         stack.alignment = .center
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -47,6 +55,8 @@ final class PageBarView: UIView, ThemeObserving {
             onCommand?(loading ? .stopLoading : .reload)
         }, for: .primaryActionTriggered)
         address.addAction(UIAction { [weak self] _ in self?.onCommand?(.editURL) }, for: .primaryActionTriggered)
+        removeFromSplitButton.addAction(UIAction { [weak self] _ in self?.onRemoveFromSplit?() }, for: .primaryActionTriggered)
+        removeFromSplitButton.isHidden = true
         ThemeCenter.shared.observe(self)
     }
 
@@ -62,9 +72,31 @@ final class PageBarView: UIView, ThemeObserving {
         forwardButton.isEnabled = nav.canGoForward
         reloadButton.setIcon(nav.loading ? .close : .reload, label: nav.loading ? "Stop" : "Reload")
         sidebarButton.setIcon(.sidebar, label: sidebarVisible ? "Hide Sidebar" : "Show Sidebar")
-        sidebarButton.isHidden = !showsSidebarButton
+        self.showsSidebarButton = showsSidebarButton
         assistantButton.isToggled = assistantOpen
         address.update(nav)
+        appliedWidth = -1
+        setNeedsLayout()
+    }
+
+    /// A narrow split pane drops the less used buttons first, so the
+    /// address always keeps room.
+    override func layoutSubviews() {
+        if bounds.width != appliedWidth {
+            appliedWidth = bounds.width
+            let width = bounds.width
+            let visible: [(UIView, Bool)] = [
+                (downloadsButton, width >= 480),
+                (forwardButton, width >= 420),
+                (removeFromSplitButton, showsRemoveFromSplit && width >= 360),
+                (assistantButton, width >= 320),
+                (sidebarButton, showsSidebarButton && width >= 280),
+            ]
+            for (view, shown) in visible where view.isHidden == shown {
+                view.isHidden = !shown
+            }
+        }
+        super.layoutSubviews()
     }
 
     func themeDidChange(_ theme: CurioTheme) {}

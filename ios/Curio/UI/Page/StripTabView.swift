@@ -12,6 +12,8 @@ final class StripTabView: TapControl, ThemeObserving, UIDragInteractionDelegate 
     private var pointerInside = false
     var onClose: (() -> Void)?
     var menuProvider: (() -> UIMenu)?
+    /// A drag of this tab began (`true`) or ended.
+    var onDrag: ((Bool) -> Void)?
 
     init(model: TabViewModel, groupColor: UIColor?) {
         tabID = model.id
@@ -63,6 +65,8 @@ final class StripTabView: TapControl, ThemeObserving, UIDragInteractionDelegate 
         favicon.configure(label: model.title, url: model.favicon, loading: model.loading)
         accessibilityLabel = model.title
         accessibilityTraits = model.active ? [.button, .selected] : .button
+        // Saved tabs (pinned or in a folder) unload (−) while their page is live.
+        closeButton.setIcon(model.unloads ? .minus : .close, label: TabRowCell.closeLabel(model))
         restyle()
     }
 
@@ -100,5 +104,13 @@ final class StripTabView: TapControl, ThemeObserving, UIDragInteractionDelegate 
         let item = UIDragItem(itemProvider: NSItemProvider())
         item.localObject = SidebarDragBox(.tab(tabID))
         return [item]
+    }
+
+    func dragInteraction(_ interaction: UIDragInteraction, sessionWillBegin session: UIDragSession) {
+        onDrag?(true)
+    }
+
+    func dragInteraction(_ interaction: UIDragInteraction, session: UIDragSession, didEndWith operation: UIDropOperation) {
+        onDrag?(false)
     }
 }

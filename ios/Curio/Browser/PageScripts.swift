@@ -62,6 +62,13 @@ nonisolated enum PageScripts {
       }
       window.addEventListener('load', reportMeta, { once: true });
 
+      // A press anywhere in the page focuses its pane in a split view. It
+      // carries no page data, and is only sent while the native side marks
+      // the page as an unfocused pane, so ordinary presses cost no message.
+      document.addEventListener('pointerdown', () => {
+        if (window.__curioReportFocus) send('focus');
+      }, { capture: true, passive: true });
+
       // Scroll position, so sleeping tabs come back where they were.
       let scrollTimer = 0;
       window.addEventListener('scroll', () => {

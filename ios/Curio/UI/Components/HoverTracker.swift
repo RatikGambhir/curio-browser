@@ -4,6 +4,9 @@ import UIKit
 /// adds itself to the view, which keeps it alive.
 final class HoverTracker: UIHoverGestureRecognizer {
     private let onChange: (Bool) -> Void
+    /// Set once a trackpad or mouse hovers anything, so touch-only layouts
+    /// can show controls that pointer users reveal by hovering.
+    private(set) static var pointerSeen = false
 
     @discardableResult
     init(_ view: UIView, onChange: @escaping (Bool) -> Void) {
@@ -19,7 +22,9 @@ final class HoverTracker: UIHoverGestureRecognizer {
 
     @objc private func hovered() {
         switch state {
-        case .began, .changed: onChange(true)
+        case .began, .changed:
+            Self.pointerSeen = true
+            onChange(true)
         default: onChange(false)
         }
     }

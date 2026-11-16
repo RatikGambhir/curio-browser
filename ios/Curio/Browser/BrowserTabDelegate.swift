@@ -13,4 +13,6 @@ protocol BrowserTabDelegate: AnyObject {
     func tab(_ tab: BrowserTab, didFinishDownload id: UUID, fileName: String?, success: Bool)
     func tab(_ tab: BrowserTab, askAboutSelection action: QuickAction?)
     func tab(_ tab: BrowserTab, present alert: UIAlertController)
+    /// The page was pressed (a split view focuses its pane).
+    func tabDidRequestFocus(_ tab: BrowserTab)
 }

@@ -14,4 +14,6 @@ enum SessionChange {
     case selection
     /// Downloads started or finished.
     case downloads
+    /// The visible split view's orientation or pane sizes changed.
+    case split
 }

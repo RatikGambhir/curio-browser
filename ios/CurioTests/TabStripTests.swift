@@ -81,4 +81,116 @@ final class TabStripTests: XCTestCase {
         XCTAssertEqual(decoded.orderedTabIDs, strip.orderedTabIDs)
         XCTAssertEqual(decoded.rows(alwaysShow: nil), strip.rows(alwaysShow: nil))
     }
+    // MARK: - Arc-style folders
+
+    func testTabsInFoldersAreSavedWithAHomeURL() {
+        var (strip, ids) = strip(3)
+        let folder = strip.createGroup(name: "Reading", color: .sage, members: [ids[0]])
+        XCTAssertTrue(strip.isSaved(ids[0]))
+        XCTAssertFalse(strip.isSaved(ids[1]))
+        XCTAssertEqual(strip.tab(ids[0])?.homeURL, "https://0.test")
+
+        // Dragging a tab into the folder saves it too.
+        XCTAssertTrue(strip.move(ids[1], to: .inGroup(folder, nil)))
+        XCTAssertTrue(strip.isSaved(ids[1]))
+        XCTAssertEqual(strip.tab(ids[1])?.homeURL, "https://1.test")
+
+        // Taking it out of the folder forgets its home.
+        XCTAssertTrue(strip.move(ids[1], to: .sectionEnd(.unpinned)))
+        XCTAssertFalse(strip.isSaved(ids[1]))
+        XCTAssertNil(strip.tab(ids[1])?.homeURL)
+    }
+
+    func testAHomeIsKeptWhileTheTabStaysSaved() {
+        var (strip, ids) = strip(1)
+        strip.createGroup(name: "Reading", color: .sage, members: [ids[0]])
+        XCTAssertTrue(strip.setTabURL(ids[0], "https://elsewhere.test"))
+        XCTAssertEqual(strip.tab(ids[0])?.homeURL, "https://0.test")
+    }
+
+    func testRemovingAFolderButKeepingTabsForgetsTheirHomes() {
+        var (strip, ids) = strip(2)
+        let folder = strip.createGroup(name: "Reading", color: .sage, members: ids)
+        strip.deleteGroup(folder, keepTabs: true)
+        for id in ids {
+            XCTAssertFalse(strip.isSaved(id))
+            XCTAssertNil(strip.tab(id)?.homeURL)
+        }
+    }
+
+    func testSavedBlankTabsUseTheFirstPageAsHome() {
+        var (strip, ids) = strip(1)
+        let folder = strip.createGroup(name: "Reading", color: .sage, members: [ids[0]])
+        let inFolder = strip.insert(Tab(), at: .afterTab(ids[0]))
+        let dragged = strip.insert(Tab(), at: .sectionEnd(.unpinned))
+        let pinned = strip.insert(Tab(), at: .sectionEnd(.unpinned))
+        XCTAssertTrue(strip.move(dragged, to: .inGroup(folder, nil)))
+        XCTAssertTrue(strip.pin(pinned))
+
+        for id in [inFolder, dragged, pinned] {
+            XCTAssertTrue(strip.isSaved(id))
+            XCTAssertNil(strip.tab(id)?.homeURL)
+            XCTAssertTrue(strip.setTabURL(id, "https://first.test"))
+            XCTAssertTrue(strip.setTabURL(id, "https://second.test"))
+            XCTAssertTrue(strip.setTabURL(id, Curio.newTabURL))
+            XCTAssertEqual(strip.tab(id)?.homeURL, "https://first.test")
+        }
+    }
+
+    func testRestoringABlankHomeUsesTheCurrentPageIfAvailable() {
+        var navigated = Tab(url: "https://current.test")
+        navigated.homeURL = Curio.newTabURL
+        var blank = Tab()
+        blank.homeURL = Curio.newTabURL
+        var strip = TabStrip(tabs: [navigated, blank], groups: [], pinned: [.tab(navigated.id), .tab(blank.id)], unpinned: [])
+        XCTAssertEqual(strip.tab(navigated.id)?.homeURL, "https://current.test")
+        XCTAssertNil(strip.tab(blank.id)?.homeURL)
+        XCTAssertTrue(strip.setTabURL(blank.id, "https://first.test"))
+        XCTAssertEqual(strip.tab(blank.id)?.homeURL, "https://first.test")
+    }
+
+    func testAnEmptyFolderStaysUntilDeleted() {
+        var (strip, ids) = strip(1)
+        let folder = strip.createGroup(name: "Empty", color: .sage, members: [])
+        XCTAssertEqual(strip.group(folder)?.tabs, [])
+        XCTAssertTrue(strip.rows(alwaysShow: nil).contains(.group(id: folder, section: .unpinned)))
+
+        strip.move(ids[0], to: .inGroup(folder, nil))
+        _ = strip.remove(ids[0])
+        XCTAssertNotNil(strip.group(folder), "closing a folder's last tab keeps the folder")
+    }
+
+    func testNewTabsOpenOutsideFolders() {
+        var (strip, ids) = strip(3)
+        let folder = strip.createGroup(name: "Reading", color: .sage, members: [ids[0]])
+        strip.pin(ids[2])
+
+        // From a regular tab: right after it.
+        XCTAssertEqual(strip.placementForNewTab(anchor: ids[1]), .afterTab(ids[1]))
+        // From a tab in a folder: right after the folder, not inside it.
+        XCTAssertEqual(strip.placementForNewTab(anchor: ids[0]), .afterGroup(folder))
+        let new = strip.insert(Tab(url: "https://new.test"), at: strip.placementForNewTab(anchor: ids[0]))
+        XCTAssertFalse(strip.isSaved(new))
+        XCTAssertNil(strip.location(of: new)?.group)
+        // From a pinned tab or nothing: top of the regular tabs.
+        for anchor in [ids[2], nil] {
+            XCTAssertEqual(strip.placementForNewTab(anchor: anchor), .sectionStart(.unpinned))
+        }
+    }
+
+    func testFoldersSurviveARoundTrip() throws {
+        var (strip, ids) = strip(2)
+        let full = strip.createGroup(name: "Reading", color: .rose, members: [ids[0]])
+        strip.setGroupCollapsed(full, true)
+        let empty = strip.createGroup(name: "Empty", color: .sage, members: [])
+        strip.moveGroup(empty, to: .sectionStart(.unpinned))
+        let decoded = try JSONDecoder().decode(TabStrip.self, from: JSONEncoder().encode(strip))
+        XCTAssertEqual(decoded.group(full)?.name, "Reading")
+        XCTAssertEqual(decoded.group(full)?.color, .rose)
+        XCTAssertEqual(decoded.group(full)?.collapsed, true)
+        XCTAssertEqual(decoded.group(full)?.tabs, [ids[0]])
+        XCTAssertEqual(decoded.group(empty)?.tabs, [])
+        XCTAssertEqual(decoded.items(.unpinned), strip.items(.unpinned))
+        XCTAssertEqual(decoded.tab(ids[0])?.homeURL, "https://0.test")
+    }
 }

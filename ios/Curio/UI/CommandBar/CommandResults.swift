@@ -8,6 +8,8 @@ struct CommandResults {
     let tabs: [TabSuggestion]
     let history: HistoryStore
     let bookmarks: BookmarkStore
+    /// The commands offered (split view commands only when available).
+    var commands: [CurioCommand] = CurioCommand.palette
 
     /// Whether every whitespace-separated term of `query` is in `haystack`.
     static func matchesAll(_ query: String, _ haystack: String) -> Bool {
@@ -21,13 +23,13 @@ struct CommandResults {
         var seen = Set<String>()
 
         func pushCommands(limit: Int) {
-            for command in CurioCommand.palette.filter({ query.isEmpty || Self.matchesAll(query, $0.title) }).prefix(limit) {
+            for command in commands.filter({ query.isEmpty || Self.matchesAll(query, $0.title) }).prefix(limit) {
                 items.append(CommandItem(key: "cmd:\(command.rawValue)", leading: .icon(command.icon), title: command.title,
                                          subtitle: nil, badge: "Command", target: .command(command)))
             }
         }
 
-        if mode == .palette { pushCommands(limit: query.isEmpty ? CurioCommand.palette.count : 6) }
+        if mode == .palette { pushCommands(limit: query.isEmpty ? commands.count : 6) }
 
         switch Omnibox.classify(query, engine: engine) {
         case .url(let url):

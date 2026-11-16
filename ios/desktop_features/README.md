@@ -24,6 +24,6 @@ iOS work builds the Swift version from it.
 | Feature | iOS status |
 | --- | --- |
 | [Media from the user's folders](media-from-user-folders.md) | Not started |
-| [Split view](split-view.md) | Not started |
+| [Split view](split-view.md) | Built on iOS |
 
 Add a row when you add a spec, and keep its status in step with the file.
