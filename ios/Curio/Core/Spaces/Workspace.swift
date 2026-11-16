@@ -295,12 +295,16 @@ nonisolated struct Workspace: Equatable, Sendable {
     }
 
     /// Moves a tab to the top of another space's regular section. A tab in
-    /// a split view takes the whole split with it, keeping its orientation
-    /// and pane sizes.
+    /// a split view takes the whole split with it by default. Joining
+    /// another split moves only the selected pane.
     @discardableResult
-    mutating func moveTab(_ id: UUID, toSpace target: UUID) -> Bool {
+    mutating func moveTab(_ id: UUID, toSpace target: UUID, includingSplit: Bool = true) -> Bool {
         guard let source = spaceOfTab(id), source != target, space(target) != nil,
               let index = spaceIndex(source) else { return false }
+        if !includingSplit {
+            guard let tab = spaces[index].strip.tab(id), closeTab(id, remember: false) != nil else { return false }
+            return openTab(tab, in: target, at: .sectionStart(.unpinned), activate: false) != nil
+        }
         let split = spaces[index].strip.split(of: id)
         let members = split?.tabs ?? [id]
         // When the active tab leaves, the nearest tab outside the moved split

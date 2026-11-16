@@ -86,12 +86,11 @@ extension BrowserViewController {
         case .newGroupFromTab:
             if let active, let group = session.newGroup(with: [active]) { beginFolderRename(group) }
         case .splitView:
+            if pendingSplitPane != nil { closeCommandBar() }
             switch session.splitView() {
-            case .added:
-                guard let pane = session.activeTabID else { break }
+            case .added(let pane):
                 openCommandBar(.newTab)
-                // Without a bar to choose its page, the blank pane goes again.
-                if commandBar != nil { pendingSplitPane = pane } else { session.discardBlankPane(pane) }
+                if commandBar != nil { pendingSplitPane = pane } else { session.cancelSplitView(pane) }
             case .noActiveTab: openCommandBar(.newTab)
             case .refused: break
             }
@@ -235,7 +234,7 @@ extension BrowserViewController {
         if let pane = pendingSplitPane {
             // Dismissed without choosing the new pane's page.
             pendingSplitPane = nil
-            session.discardBlankPane(pane)
+            session.cancelSplitView(pane)
         }
         bar.view.endEditing(true)
         bar.willMove(toParent: nil)
@@ -247,16 +246,26 @@ extension BrowserViewController {
     /// Runs a command bar choice. `splitPane` is the blank pane Split View
     /// added: a page opens in it, an existing tab takes its place in the
     /// split, and anything else drops it.
-    private func execute(_ target: CommandTarget, splitPane: UUID? = nil) {
-        if let splitPane {
-            if case .navigate = target {} else { session.discardBlankPane(splitPane) }
-        }
+    private func execute(_ target: CommandTarget, splitPane: BrowserSession.PendingSplitPane?) {
         switch target {
-        case .navigate(let url, let newTab): session.open(url, newTab: newTab)
+        case .navigate(let url, let newTab):
+            if let splitPane, session.workspace.tab(splitPane.id)?.isNewTabPage == true {
+                if session.activeTabID != splitPane.id { session.activateTab(splitPane.id) }
+                session.navigateActive(url)
+            } else {
+                session.open(url, newTab: newTab)
+            }
         case .switchTab(let id):
-            if splitPane != nil { session.splitWith(id, before: false) } else { session.activateTab(id) }
-        case .command(let command): perform(command)
+            if let splitPane {
+                session.replaceSplitPane(splitPane, with: id)
+            } else {
+                session.activateTab(id)
+            }
+        case .command(let command):
+            if let splitPane { session.cancelSplitView(splitPane) }
+            perform(command)
         case .askAI(let question):
+            if let splitPane { session.cancelSplitView(splitPane) }
             showAssistant(focus: false)
             assistant.ask(question)
         }

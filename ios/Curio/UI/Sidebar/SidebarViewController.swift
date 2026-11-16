@@ -189,7 +189,7 @@ final class SidebarViewController: UIViewController, ThemeObserving {
         var rows: [SidebarItem] = []
         var dividerDone = false
         // The single-page layout lists a split's panes as ordinary tabs.
-        for row in space.strip.rows(alwaysShow: space.activeTab, showingSplits: session.splitAvailable) {
+        for row in space.strip.rows(alwaysShow: space.activeTab, showingSplit: session.splitRoom.fits) {
             if row.section == .unpinned && !dividerDone {
                 rows.append(.divider)
                 dividerDone = true

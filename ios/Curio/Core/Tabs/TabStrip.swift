@@ -231,7 +231,7 @@ nonisolated struct TabStrip: Equatable, Sendable {
     /// Removes a tab, returning it with a placement to restore it later.
     mutating func remove(_ id: UUID) -> RemovedTab? {
         guard let restoreAt = detach(id), let tab = tabsByID.removeValue(forKey: id) else { return nil }
-        repairSplits()
+        detachFromSplit(id)
         return RemovedTab(tab: tab, restoreAt: restoreAt)
     }
 
@@ -444,16 +444,19 @@ nonisolated struct TabStrip: Equatable, Sendable {
     /// unless they are `alwaysShow` (the active tab stays visible under its
     /// collapsed folder, as in Arc).
     ///
-    /// With `showingSplits`, a split is one `.split` row where its first tab
-    /// would be, and its other tabs get no row of their own. Without it (the
-    /// single-page layout), every pane is listed as an ordinary tab.
-    func rows(alwaysShow: UUID?, showingSplits: Bool = true) -> [TabRow] {
+    /// A split allowed by `showingSplit` is one row in its first tab's
+    /// place. Other splits list their panes as ordinary tabs.
+    func rows(alwaysShow: UUID?, showingSplit: (TabSplit) -> Bool = { _ in true }) -> [TabRow] {
         var rows: [TabRow] = []
+        func shownSplit(of tab: UUID) -> TabSplit? {
+            guard let split = split(of: tab), showingSplit(split) else { return nil }
+            return split
+        }
         // The split the always-shown tab belongs to stays visible with it
         // (only where it is one row; otherwise just the tab shows).
-        let alwaysSplit = showingSplits ? alwaysShow.flatMap { split(of: $0)?.id } : nil
+        let alwaysSplit = alwaysShow.flatMap { shownSplit(of: $0)?.id }
         func row(_ id: UUID, _ section: TabSection, _ group: UUID?) -> TabRow? {
-            guard showingSplits, let split = split(of: id) else { return .tab(id: id, section: section, group: group) }
+            guard let split = shownSplit(of: id) else { return .tab(id: id, section: section, group: group) }
             return split.tabs.first == id ? .split(id: split.id, section: section, group: group) : nil
         }
         for section in TabSection.allCases {
@@ -531,11 +534,42 @@ nonisolated struct TabStrip: Equatable, Sendable {
     /// tabs.
     @discardableResult
     mutating func addToSplit(_ id: UUID, tab: UUID, at index: Int) -> Bool {
-        guard contains(tab), let split = splitsByID[id], !split.isFull, !split.contains(tab) else { return false }
+        guard var split = splitsByID[id], let last = split.tabs.last, !split.isFull, !split.contains(tab),
+              detach(tab) != nil else { return false }
         detachFromSplit(tab)
-        let added = splitsByID[id]?.addTab(tab, at: index) ?? false
-        repairSplits()
-        return added
+        let position = max(0, index)
+        let placement: TabPlacement = position < split.tabs.count ? .beforeTab(split.tabs[position]) : .afterTab(last)
+        attach(tab, placement)
+        syncHome(tab)
+        split.addTab(tab, at: position)
+        splitsByID[id] = split
+        return true
+    }
+
+    /// Replaces a blank pane in place, keeping the split's sizes and
+    /// orientation. A saved tab can bring a regular split into its container.
+    @discardableResult
+    mutating func replaceBlankPane(_ pane: UUID, with tab: UUID) -> Bool {
+        guard tabsByID[pane]?.isNewTabPage == true, let split = split(of: pane),
+              let index = split.tabs.firstIndex(of: pane), !split.contains(tab),
+              location(of: tab) != nil else { return false }
+        detachFromSplit(tab)
+        if isSaved(tab) && !isSaved(pane) { move(pane, to: .afterTab(tab)) }
+        _ = detach(tab)
+        attach(tab, .beforeTab(pane))
+        syncHome(tab)
+        _ = detach(pane)
+        tabsByID.removeValue(forKey: pane)
+        splitsByID[split.id]?.tabs[index] = tab
+        return true
+    }
+
+    /// Restores the sizes from before a blank pane was added, provided the
+    /// same panes are still together in the same order and orientation.
+    mutating func restoreSplitSizes(from previous: TabSplit) {
+        guard let split = splitsByID[previous.id], split.tabs == previous.tabs,
+              split.orientation == previous.orientation else { return }
+        splitsByID[previous.id]?.sizes = previous.sizes
     }
 
     /// Takes a tab out of its split and puts it right after the split. A

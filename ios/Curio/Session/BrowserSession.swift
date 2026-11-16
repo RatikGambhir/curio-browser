@@ -492,10 +492,16 @@ final class BrowserSession {
 
     // MARK: - Split view
 
+    struct PendingSplitPane {
+        let id: UUID
+        let anchor: UUID
+        let previousSplit: TabSplit?
+    }
+
     /// What Split View did.
     enum SplitResult {
         /// A new pane was added and focused; its page is chosen next.
-        case added
+        case added(PendingSplitPane)
         /// There is no tab to split with; open a new tab instead.
         case noActiveTab
         /// Refused (the reason was shown) or not available.
@@ -509,11 +515,13 @@ final class BrowserSession {
     /// split when it starts or stops fitting.
     func setSplitRoom(_ room: SplitRoom) {
         guard room != splitRoom else { return }
-        let before = (visibleTabIDs, splitRoom.available)
+        let previousRoom = splitRoom
+        let previouslyVisible = visibleTabIDs
         splitRoom = room
-        if visibleTabIDs != before.0 {
+        if visibleTabIDs != previouslyVisible {
             syncActiveTab()
-        } else if room.available != before.1 {
+        } else if room.available != previousRoom.available ||
+                    workspace.activeSpace.strip.splits.contains(where: { room.fits($0) != previousRoom.fits($0) }) {
             delegate?.session(self, didChange: .tabs)
         }
     }
@@ -563,7 +571,7 @@ final class BrowserSession {
             }
         }
         activateTab(pane.id)
-        return .added
+        return .added(PendingSplitPane(id: pane.id, anchor: active, previousSplit: existing))
     }
 
     /// Whether `split` (or a new split, for `nil`) can take one more pane:
@@ -584,13 +592,49 @@ final class BrowserSession {
 
     static let splitRoomMessage = "There isn’t room for another pane here"
 
-    /// Drops a pane that Split View added if its page was never chosen (it
-    /// still shows the new tab page). It doesn't go to Archived Tabs.
-    func discardBlankPane(_ id: UUID) {
-        guard workspace.tab(id)?.isNewTabPage == true, workspace.closeTab(id, remember: false) != nil else { return }
-        releaseTab(id)
+    /// Dismisses the blank pane and restores the focus and sizes from before
+    /// the picker. The blank pane doesn't go to Archived Tabs.
+    func cancelSplitView(_ pane: PendingSplitPane) {
+        guard let spaceID = workspace.spaceOfTab(pane.id), let space = workspace.space(spaceID),
+              space.strip.tab(pane.id)?.isNewTabPage == true,
+              workspace.closeTab(pane.id, remember: false) != nil else { return }
+        workspace.updateSpace(spaceID) { updated in
+            if let previous = pane.previousSplit { updated.strip.restoreSplitSizes(from: previous) }
+            if space.activeTab == pane.id, updated.strip.contains(pane.anchor) {
+                updated.activeTab = pane.anchor
+            }
+        }
+        releaseTab(pane.id)
         syncActiveTab()
         scheduleSave()
+    }
+
+    /// Puts an existing tab in the blank pane's exact slot.
+    func replaceSplitPane(_ pane: PendingSplitPane, with tab: UUID) {
+        guard let spaceID = workspace.spaceOfTab(pane.id), let strip = workspace.space(spaceID)?.strip,
+              strip.tab(pane.id)?.isNewTabPage == true, let split = strip.split(of: pane.id) else {
+            cancelSplitView(pane)
+            return
+        }
+        guard let tabSpace = workspace.spaceOfTab(tab) else {
+            cancelSplitView(pane)
+            if workspace.tab(tab) != nil {
+                delegate?.session(self, showToast: Self.splitFavoriteMessage, title: nil, kind: .info)
+            }
+            return
+        }
+        if split.contains(tab) {
+            cancelSplitView(pane)
+            if tab != pane.id { activateTab(tab) }
+            return
+        }
+        if tabSpace != spaceID, !workspace.moveTab(tab, toSpace: spaceID, includingSplit: false) {
+            cancelSplitView(pane)
+            return
+        }
+        workspace.updateSpace(spaceID) { $0.strip.replaceBlankPane(pane.id, with: tab) }
+        releaseTab(pane.id)
+        activateTab(tab)
     }
 
     /// Shows `tab` beside the active tab: before or after it, in a new split
@@ -617,7 +661,7 @@ final class BrowserSession {
         }
         // Check before changing anything, so a refusal leaves every tab put.
         guard canGrowSplit(existing) else { return }
-        if tabSpace != spaceID { workspace.moveTab(tab, toSpace: spaceID) }
+        if tabSpace != spaceID, !workspace.moveTab(tab, toSpace: spaceID, includingSplit: false) { return }
         workspace.updateSpace(spaceID) { space in
             space.strip.removeFromSplit(tab)
             let toTab = space.strip.isSaved(tab) && !space.strip.isSaved(active)

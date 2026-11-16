@@ -1,3 +1,4 @@
+import UIKit
 import XCTest
 @testable import Curio
 
@@ -74,7 +75,7 @@ final class SplitViewTests: XCTestCase {
         XCTAssertEqual(rows.count, 3)
         XCTAssertEqual(rows[0], .split(id: split, section: .unpinned, group: nil))
         // The single-page layout lists every pane as a tab.
-        XCTAssertEqual(strip.rows(alwaysShow: nil, showingSplits: false).count, 4)
+        XCTAssertEqual(strip.rows(alwaysShow: nil, showingSplit: { _ in false }).count, 4)
         XCTAssertNil(strip.createSplit([ids[1]]))
         XCTAssertNil(strip.createSplit([ids[1], UUID()]), "unknown tabs don't count")
     }
@@ -95,6 +96,20 @@ final class SplitViewTests: XCTestCase {
             return false
         })
         XCTAssertEqual(strip.rows(alwaysShow: nil).count, 2, "folder header and the other tab")
+    }
+
+    func testInsertingBeforeFirstPaneKeepsTheSplitAndHomeURLsInItsFolder() throws {
+        var (strip, ids) = strip(3)
+        let folder = strip.createGroup(name: "Saved", color: .ocean, members: Array(ids.prefix(2)))
+        let split = try XCTUnwrap(strip.createSplit(Array(ids.prefix(2))))
+        strip.setTabURL(ids[0], "https://site0.test/next")
+
+        XCTAssertTrue(strip.addToSplit(split, tab: ids[2], at: 0))
+
+        XCTAssertEqual(strip.group(folder)?.tabs, [ids[2], ids[0], ids[1]])
+        XCTAssertEqual(strip.split(split)?.tabs, [ids[2], ids[0], ids[1]])
+        XCTAssertEqual(strip.tab(ids[0])?.homeURL, "https://site0.test")
+        XCTAssertEqual(strip.tab(ids[2])?.homeURL, "https://site2.test")
     }
 
     func testMovingOnePaneMovesTheWholeSplit() {
@@ -251,6 +266,26 @@ final class SplitViewTests: XCTestCase {
         XCTAssertFalse(SplitRoom.none.available)
     }
 
+    func testSidebarRowsUseTheFitOfEachSplit() throws {
+        var (strip, ids) = strip(5)
+        let large = try XCTUnwrap(strip.createSplit(Array(ids.prefix(3))))
+        let small = try XCTUnwrap(strip.createSplit(Array(ids.suffix(2))))
+        let room = SplitRoom(supported: true, size: CGSize(width: 650, height: 800))
+
+        XCTAssertEqual(strip.rows(alwaysShow: ids[0], showingSplit: room.fits), [
+            .tab(id: ids[0], section: .unpinned, group: nil),
+            .tab(id: ids[1], section: .unpinned, group: nil),
+            .tab(id: ids[2], section: .unpinned, group: nil),
+            .split(id: small, section: .unpinned, group: nil),
+        ])
+
+        strip.flipSplit(large)
+        XCTAssertEqual(strip.rows(alwaysShow: ids[0], showingSplit: room.fits), [
+            .split(id: large, section: .unpinned, group: nil),
+            .split(id: small, section: .unpinned, group: nil),
+        ])
+    }
+
     // MARK: - Workspace (curio-spaces)
 
     private func workspaceWithTabs() -> (Workspace, UUID, UUID, [UUID]) {
@@ -295,12 +330,12 @@ final class SplitViewTests: XCTestCase {
         let folder = strip.createGroup(name: "Docs", color: .ocean, members: ids)
         strip.createSplit([ids[0], ids[1]])
         strip.setGroupCollapsed(folder, true)
-        XCTAssertEqual(strip.rows(alwaysShow: ids[1], showingSplits: false), [
+        XCTAssertEqual(strip.rows(alwaysShow: ids[1], showingSplit: { _ in false }), [
             .group(id: folder, section: .unpinned),
             .tab(id: ids[1], section: .unpinned, group: folder),
         ])
         let split = strip.split(of: ids[0])!.id
-        XCTAssertEqual(strip.rows(alwaysShow: ids[1], showingSplits: true), [
+        XCTAssertEqual(strip.rows(alwaysShow: ids[1]), [
             .group(id: folder, section: .unpinned),
             .split(id: split, section: .unpinned, group: folder),
         ])
@@ -356,5 +391,71 @@ final class SplitViewTests: XCTestCase {
         XCTAssertEqual(split.sizes[0], 0.6, accuracy: 1e-9)
         XCTAssertEqual(strip.group(folder)?.tabs, [ids[1], ids[2]])
         XCTAssertTrue(strip.isSaved(ids[2]))
+    }
+
+    // MARK: - Split picker
+
+    @MainActor
+    private func splitSession() throws -> BrowserSession {
+        let app = try XCTUnwrap(UIApplication.shared.delegate as? AppDelegate)
+        let session = BrowserSession(services: app.services)
+        session.saveSpace(nil, name: "Split Test", icon: "✦", gradient: .default)
+        session.setSplitRoom(SplitRoom(supported: true, size: CGSize(width: 1100, height: 900)))
+        return session
+    }
+
+    @MainActor
+    func testCancelingSplitPickerRestoresFocusAndPaneSizes() async throws {
+        let session = try splitSession()
+        let left = session.openInNewTab("curio://left")
+        let right = session.openInNewTab("curio://right", activate: false)
+        session.splitWith(right, before: false)
+        session.activateTab(left)
+        let split = try XCTUnwrap(session.activeSplit?.id)
+        session.resizeSplit(split, divider: 0, by: 0.2)
+        let original = try XCTUnwrap(session.activeSplit)
+
+        guard case .added(let pane) = session.splitView() else { return XCTFail("Expected a blank pane") }
+        XCTAssertEqual(session.visibleTabIDs, [left, pane.id, right])
+        session.cancelSplitView(pane)
+
+        XCTAssertEqual(session.activeTabID, left)
+        XCTAssertEqual(session.activeSplit, original)
+        XCTAssertNil(session.workspace.tab(pane.id))
+        XCTAssertFalse(session.workspace.closedTabs.contains { $0.tab.id == pane.id })
+    }
+
+    @MainActor
+    func testSplitPickerKeepsTheSlotAndLeavesOtherSourcePanesInPlace() async throws {
+        let session = try splitSession()
+        let source = session.workspace.activeSpaceID
+        let chosen = session.openInNewTab("curio://chosen")
+        let first = session.openInNewTab("curio://first", activate: false)
+        let second = session.openInNewTab("curio://second", activate: false)
+        session.splitWith(first, before: false)
+        session.splitWith(second, before: false)
+        let sourceSplit = try XCTUnwrap(session.activeSplit?.id)
+        session.flipSplit(sourceSplit)
+        session.activateTab(chosen)
+        session.saveSpace(nil, name: "Destination", icon: "✦", gradient: .default)
+        let destination = session.workspace.activeSpaceID
+        let left = session.openInNewTab("curio://left")
+        let right = session.openInNewTab("curio://right", activate: false)
+        session.splitWith(right, before: false)
+        session.activateTab(left)
+        guard case .added(let pane) = session.splitView() else { return XCTFail("Expected a blank pane") }
+        let preview = try XCTUnwrap(session.activeSplit)
+
+        session.replaceSplitPane(pane, with: chosen)
+
+        XCTAssertEqual(session.activeTabID, chosen)
+        XCTAssertEqual(session.workspace.spaceOfTab(chosen), destination)
+        XCTAssertEqual(session.activeSplit?.id, preview.id)
+        XCTAssertEqual(session.activeSplit?.tabs, [left, chosen, right])
+        XCTAssertEqual(session.activeSplit?.sizes, preview.sizes)
+        XCTAssertNil(session.workspace.tab(pane.id))
+        XCTAssertEqual(session.workspace.space(source)?.activeTab, first)
+        XCTAssertEqual(session.workspace.space(source)?.strip.split(sourceSplit)?.tabs, [first, second])
+        XCTAssertEqual(session.workspace.space(source)?.strip.split(sourceSplit)?.orientation, .vertical)
     }
 }

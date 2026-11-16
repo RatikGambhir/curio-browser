@@ -234,6 +234,9 @@ Tests that define the behavior:
   actions and split drop zones, and disable its keyboard shortcuts. Keep
   the split, pane sizes and orientation saved. Restore the split when the
   page area can fit it again and a member tab is active.
+- **Split picker:** choosing an open tab puts it in the blank pane's slot.
+  Choosing a pane from another space moves only that tab. Dismissing the
+  picker removes the blank pane and restores the prior focus and sizes.
 - **Touch instead of hover and right-click:** the split row's segments get
   the tab context menu on long press, with the split items first. Drag the
   gap with a pan gesture (make the hit target at least 44pt even though the

@@ -21,8 +21,8 @@ nonisolated struct SplitRoom: Equatable, Sendable {
 
     static let none = SplitRoom(supported: false, size: .zero)
 
-    /// Whether Split View is offered (menus, shortcuts, drop zones, the
-    /// split row in the sidebar).
+    /// Whether a new side-by-side split can be offered in menus, shortcuts
+    /// and drop zones.
     var available: Bool { fits(panes: TabSplit.minPanes, orientation: .horizontal) }
 
     /// Whether `panes` panes fit in `orientation`.
