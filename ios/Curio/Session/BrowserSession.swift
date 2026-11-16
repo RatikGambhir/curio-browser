@@ -22,13 +22,7 @@ final class BrowserSession {
 
     init(services: AppServices) {
         self.services = services
-        let restored = services.settings.settings.browsing.restoreSession ? services.workspaceStore.load() : nil
-        workspace = restored ?? .firstRun()
-        if restored == nil, let saved = services.workspaceStore.load() {
-            // Not restoring tabs still keeps spaces, saved tabs (pinned and in
-            // folders), folders and favorites.
-            workspace = Self.withoutRegularTabs(saved)
-        }
+        workspace = services.workspaceStore.load(restoreSession: services.settings.settings.browsing.restoreSession)
         maintenanceTask = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(60))
@@ -43,17 +37,6 @@ final class BrowserSession {
     }
 
     var settings: Settings { services.settings.settings }
-
-    private static func withoutRegularTabs(_ saved: Workspace) -> Workspace {
-        var workspace = saved
-        for space in saved.spaces {
-            for case .tab(let id) in space.strip.items(.unpinned) {
-                _ = workspace.closeTab(id)
-            }
-            workspace.updateSpace(space.id) { $0.activeTab = $0.strip.orderedTabIDs.first }
-        }
-        return Workspace(spaces: workspace.spaces, favorites: workspace.favorites)
-    }
 
     // MARK: - Reading state
 

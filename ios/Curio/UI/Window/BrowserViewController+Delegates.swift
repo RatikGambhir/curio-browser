@@ -14,6 +14,9 @@ extension BrowserViewController: BrowserSessionDelegate {
             assistant.refreshContext()
             refreshBars()
             if libraryOpen { library.reload() }
+            if let sheet = presentedViewController as? LibraryViewController, sheet.section == .archivedTabs {
+                sheet.reload()
+            }
         case .activeTab:
             page.showActiveTab()
             assistant.refreshContext()

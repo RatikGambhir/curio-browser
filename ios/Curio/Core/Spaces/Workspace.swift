@@ -11,7 +11,7 @@ nonisolated struct Workspace: Equatable, Sendable {
     private(set) var spaces: [Space]
     private(set) var favorites: [Favorite]
     private(set) var activeSpaceID: UUID
-    private(set) var closedTabs: [ClosedTab] = []
+    private(set) var closedTabs: [ClosedTab]
 
     /// Builds a workspace from persisted parts. An empty list gets a default
     /// space so there is always somewhere to put tabs.
@@ -21,7 +21,8 @@ nonisolated struct Workspace: Equatable, Sendable {
         self.spaces = spaces
         self.favorites = favorites
         activeSpaceID = spaces[0].id
-        closedTabs = Self.restoredClosedTabs(closed, spaces: spaces)
+        // The sort is stable, so equal timestamps keep their saved order.
+        closedTabs = Array(closed.sorted { $0.closedAt > $1.closedAt }.prefix(Self.closedTabLimit))
         // Drop active-tab references that no longer resolve.
         for index in self.spaces.indices {
             if let active = self.spaces[index].activeTab, findTab(active) == nil {
@@ -30,23 +31,12 @@ nonisolated struct Workspace: Equatable, Sendable {
         }
     }
 
-    /// Saved closed tabs, ready to use: tabs whose space is gone are
-    /// dropped, the rest are newest first (ties keep their saved order),
-    /// and at most `closedTabLimit` are kept.
-    private static func restoredClosedTabs(_ closed: [ClosedTab], spaces: [Space]) -> [ClosedTab] {
-        let kept = closed.enumerated().filter { item in spaces.contains { $0.id == item.element.space } }
-        let sorted = kept.sorted { a, b in
-            a.element.closedAt != b.element.closedAt ? a.element.closedAt > b.element.closedAt : a.offset < b.offset
-        }
-        return Array(sorted.prefix(closedTabLimit).map(\.element))
-    }
-
     /// A first-run workspace with two starter spaces.
-    static func firstRun() -> Workspace {
+    static func firstRun(closed: [ClosedTab] = []) -> Workspace {
         Workspace(spaces: [
             Space(name: "Personal", icon: "✦", gradient: .lavenderBlush),
             Space(name: "Work", icon: "💼", gradient: .skyHaze),
-        ], favorites: [])
+        ], favorites: [], closed: closed)
     }
 
     // MARK: - Spaces
@@ -104,7 +94,6 @@ nonisolated struct Workspace: Equatable, Sendable {
         if activeSpaceID == id {
             activeSpaceID = spaces[min(index, spaces.count - 1)].id
         }
-        closedTabs.removeAll { $0.space == id }
         return removed
     }
 
@@ -233,38 +222,39 @@ nonisolated struct Workspace: Equatable, Sendable {
     }
 
     /// Closed tabs for the Library's Archived Tabs, newest first, with the
-    /// space each came from. Every word of `query` must appear in the tab's
-    /// title, its URL or the space's name.
-    func archivedTabs(matching query: String) -> [(closed: ClosedTab, space: Space)] {
+    /// space each came from if it still exists. Every word of `query` must
+    /// appear in the tab's title, its URL or the space's name.
+    func archivedTabs(matching query: String) -> [(closed: ClosedTab, space: Space?)] {
         let words = query.split(whereSeparator: \.isWhitespace)
         return closedTabs.compactMap { closed in
-            guard let owner = space(closed.space) else { return nil }
-            let fields = [closed.tab.displayTitle, closed.tab.url, owner.name]
+            let owner = space(closed.space)
+            var fields = [closed.tab.displayTitle, closed.tab.url]
+            if let owner { fields.append(owner.name) }
             let matches = words.allSatisfy { word in fields.contains { $0.localizedStandardContains(word) } }
             return matches ? (closed, owner) : nil
         }
     }
 
-    /// Reopens the most recently closed tab in its original place.
+    /// Reopens the most recently closed tab.
     mutating func reopenClosedTab() -> UUID? {
-        while !closedTabs.isEmpty {
-            let closed = closedTabs.removeFirst()
-            guard space(closed.space) != nil else { continue }
-            openTab(closed.tab, in: closed.space, at: closed.restoreAt, activate: true)
+        guard !closedTabs.isEmpty else { return nil }
+        return reopen(at: 0)
+    }
+
+    /// Reopens one closed tab by its ID.
+    mutating func reopenClosed(_ id: UUID) -> UUID? {
+        guard let index = closedTabs.firstIndex(where: { $0.tab.id == id }) else { return nil }
+        return reopen(at: index)
+    }
+
+    /// Uses the saved placement if the space still exists.
+    private mutating func reopen(at index: Int) -> UUID {
+        let closed = closedTabs.remove(at: index)
+        if openTab(closed.tab, in: closed.space, at: closed.restoreAt, activate: true) != nil {
             activeSpaceID = closed.space
             return closed.tab.id
         }
-        return nil
-    }
-
-    /// Reopens one closed tab in its original place.
-    mutating func reopenClosed(_ id: UUID) -> UUID? {
-        guard let index = closedTabs.firstIndex(where: { $0.tab.id == id }) else { return nil }
-        let closed = closedTabs.remove(at: index)
-        guard space(closed.space) != nil else { return nil }
-        openTab(closed.tab, in: closed.space, at: closed.restoreAt, activate: true)
-        activeSpaceID = closed.space
-        return id
+        return openTabInActiveSpace(closed.tab, activate: true)
     }
 
     /// Duplicates a tab next to the original and returns the copy's id.

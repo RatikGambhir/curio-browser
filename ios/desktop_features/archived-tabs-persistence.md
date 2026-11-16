@@ -2,7 +2,7 @@
 
 | | |
 | --- | --- |
-| **iOS status** | Not started |
+| **iOS status** | Built on iOS |
 | **Built on desktop** | 2026-11-06, uncommitted at time of writing |
 | **Ticket** | None |
 
@@ -39,14 +39,14 @@ restored, and they stay in the archive after their space is deleted.
 
 ### Functional
 
-- [ ] `deleteSpace` no longer removes that space's closed tabs.
-- [ ] Restoring saved closed tabs keeps tabs whose space is missing (still
+- [x] `deleteSpace` no longer removes that space's closed tabs.
+- [x] Restoring saved closed tabs keeps tabs whose space is missing (still
       sorted newest first by `closedAt`, still capped at 50).
-- [ ] `reopenClosedTab` and `reopenClosed(_:)` open a tab whose space is
+- [x] `reopenClosedTab` and `reopenClosed(_:)` open a tab whose space is
       missing in the active space instead of skipping or dropping it.
-- [ ] `archivedTabs(matching:)` returns tabs whose space is missing, with no
+- [x] `archivedTabs(matching:)` returns tabs whose space is missing, with no
       space.
-- [ ] When the session isn't restored, the saved closed tabs are still loaded
+- [x] When the session isn't restored, the saved closed tabs are still loaded
       into the fresh workspace before anything is saved.
 
 ### Data and storage
@@ -99,17 +99,17 @@ Tests: `browser/crates/curio-spaces/src/lib.rs`
 
 ## Acceptance criteria
 
-- [ ] Close a tab, delete its space: the tab is still in Archived Tabs, with
+- [x] Close a tab, delete its space: the tab is still in Archived Tabs, with
       no color dot and no space name.
-- [ ] Tap it: it opens in the active space and becomes the active tab.
-- [ ] Reopen Closed Tab with an orphaned tab newest: it reopens in the
+- [x] Tap it: it opens in the active space and becomes the active tab.
+- [x] Reopen Closed Tab with an orphaned tab newest: it reopens in the
       active space instead of being skipped.
-- [ ] Turn off "Restore previous session", close a tab, quit, relaunch: the
+- [x] Turn off "Restore previous session", close a tab, quit, relaunch: the
       tab is still in Archived Tabs.
-- [ ] Close a tab, quit, relaunch with restore on: the tab is still there
+- [x] Close a tab, quit, relaunch with restore on: the tab is still there
       (unchanged behavior).
 - [ ] VoiceOver reads `Reopen in <active space>` for orphaned rows.
-- [ ] Unit tests ported from the Rust tests above.
+- [x] Unit tests ported from the Rust tests above.
 
 ## Open questions
 

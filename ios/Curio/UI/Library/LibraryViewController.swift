@@ -275,19 +275,25 @@ final class LibraryViewController: UIViewController, ThemeObserving {
 
     private func archiveRows(_ query: String) -> [UIView] {
         list.spacing = 2
-        return session.workspace.archivedTabs(matching: query).map { closed, space in
+        let workspace = session.workspace
+        return workspace.archivedTabs(matching: query).map { closed, space in
             let host = Curio.displayHost(closed.tab.url)
             let title = closed.tab.displayTitle
-            let control = row(title: title, subtitle: "\(host) · \(space.name)",
+            let subtitle = space.map { "\(host) · \($0.name)" } ?? host
+            let control = row(title: title, subtitle: subtitle,
                               favicon: closed.tab.faviconURL, pageURL: closed.tab.url, label: title) { [weak self] in
                 self?.session.reopenArchivedTab(closed.tab.id)
                 self?.delegate?.libraryDidClose()
             }
-            // The space's dot, so it's clear at a glance where the tab was.
-            control.row.trailingStack.addArrangedSubview(ColorDotView(color: CurioTheme.swatch(space.gradient)))
-            control.toolTip = "Reopen in \(space.name)"
-            control.accessibilityLabel = "\(title), \(host), closed in \(space.name)"
-            control.accessibilityHint = "Reopens the tab in \(space.name)"
+            let reopenHint = "Reopen in \(space?.name ?? workspace.activeSpace.name)"
+            control.addInteraction(UIToolTipInteraction(defaultToolTip: reopenHint))
+            if let space {
+                control.row.trailingStack.addArrangedSubview(ColorDotView(color: CurioTheme.swatch(space.gradient)))
+                control.accessibilityLabel = "\(title), \(host), closed in \(space.name)"
+                control.accessibilityHint = "Reopens the tab in \(space.name)"
+            } else {
+                control.accessibilityHint = reopenHint
+            }
             return control
         }
     }
