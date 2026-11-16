@@ -1,5 +1,6 @@
 import os
 import UIKit
+import WebKit
 import XCTest
 @testable import Curio
 
@@ -72,8 +73,74 @@ final class FaviconTests: XCTestCase {
     }
 
     @MainActor
+    func testTemporaryFailuresRetryAndRecover() async {
+        let loader = makeLoader()
+        for path in ["/retry-timeout", "/retry-server-error"] {
+            let urls = candidates(declaredPath: path)
+            let recovered = await loader.image(for: urls)
+            let retried = await loader.image(for: Array(urls.prefix(1)))
+            XCTAssertNotNil(recovered)
+            XCTAssertNotNil(retried)
+            XCTAssertEqual(FaviconResponseStub.requests().filter { $0.path == path }.count, 2)
+        }
+    }
+
+    @MainActor
+    func testOversizedHeaderAndUnannouncedOversizedBodyUseFallback() async {
+        let loader = makeLoader()
+        for path in ["/oversized-header", "/oversized-body"] {
+            let urls = candidates(declaredPath: path)
+            let recovered = await loader.image(for: urls)
+            let rejected = await loader.image(for: Array(urls.prefix(1)))
+            XCTAssertNotNil(recovered)
+            XCTAssertNil(rejected)
+            XCTAssertEqual(FaviconResponseStub.requests().filter { $0.path == path }.count, 1)
+        }
+        let boundary = await loader.image(for: Array(candidates(declaredPath: "/exact-limit").prefix(1)))
+        XCTAssertNotNil(boundary)
+    }
+
+    func testWebKitDownloadRequiresBoundedUnencodedBody() throws {
+        let url = try XCTUnwrap(URL(string: "http://favicon.test/favicon.ico"))
+        func response(_ fields: [String: String]) throws -> HTTPURLResponse {
+            try XCTUnwrap(HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: fields))
+        }
+        XCTAssertNoThrow(try WebFaviconDownload.validate(response(["Content-Length": "128"])))
+        XCTAssertThrowsError(try WebFaviconDownload.validate(response([:])))
+        XCTAssertThrowsError(try WebFaviconDownload.validate(response(["Content-Length": "524289"])))
+        XCTAssertThrowsError(try WebFaviconDownload.validate(response(["Content-Length": "128", "Content-Encoding": "gzip"])))
+        XCTAssertThrowsError(try WebFaviconDownload.validate(response(["Content-Length": "128", "Transfer-Encoding": "chunked"])))
+    }
+
+    @MainActor
+    func testRestoredDocumentReportsItsDeclaredFaviconAgain() async throws {
+        let restoredIcon = "https://favicon.test/restored.ico"
+        let restored = expectation(description: "Updated metadata from the restored document")
+        let probe = FaviconBridgeProbe { body in
+            if body["type"] as? String == "meta", body["favicon"] as? String == restoredIcon {
+                restored.fulfill()
+            }
+        }
+        let world = WKContentWorld.world(name: "Curio Favicon Tests")
+        let configuration = WKWebViewConfiguration()
+        configuration.userContentController.add(probe, contentWorld: world, name: "curio")
+        let webView = WKWebView(frame: .zero, configuration: configuration)
+        _ = try await webView.callAsyncJavaScript("""
+            \(PageScripts.bridge(token: "test"));
+            const icon = document.createElement('link');
+            icon.rel = 'icon';
+            icon.href = '\(restoredIcon)';
+            document.head.appendChild(icon);
+            window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+            """, arguments: [:], in: nil, contentWorld: world)
+        await fulfillment(of: [restored], timeout: 5)
+    }
+
+    @MainActor
     func testReusedViewKeepsItsLetterWhenAFormerPagesIconFinishes() async throws {
         let loader = makeLoader()
+        let requested = expectation(description: "The first view has started its favicon request")
+        FaviconResponseStub.onSlowRequest { requested.fulfill() }
         let view = FaviconView(loader: loader)
         let firstURL = "https://favicon.test/slow"
         let secondURL = "https://missing-favicon.test/page"
@@ -85,15 +152,12 @@ final class FaviconTests: XCTestCase {
         XCTAssertFalse(letter.isHidden)
         XCTAssertTrue(image.isHidden)
 
-        let clock = ContinuousClock()
-        let deadline = clock.now + .seconds(2)
-        while FaviconResponseStub.requests().isEmpty && clock.now < deadline {
-            try await Task.sleep(for: .milliseconds(5))
-        }
+        await fulfillment(of: [requested], timeout: 5)
         XCTAssertEqual(FaviconResponseStub.requests().map(\.absoluteString), [firstURL])
         view.configure(label: "Second", url: nil, pageURL: secondURL)
 
         let newImage = await loader.image(for: FaviconLoader.candidates(declared: nil, pageURL: secondURL))
+        FaviconResponseStub.completeSlowRequest()
         let oldImage = await loader.image(for: FaviconLoader.candidates(declared: firstURL, pageURL: firstURL))
         XCTAssertNil(newImage)
         XCTAssertNotNil(oldImage)
@@ -117,40 +181,84 @@ final class FaviconTests: XCTestCase {
     }
 }
 
+@MainActor
+private final class FaviconBridgeProbe: NSObject, WKScriptMessageHandler {
+    private let receive: ([String: Any]) -> Void
+
+    init(receive: @escaping ([String: Any]) -> Void) { self.receive = receive }
+
+    func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+        if let body = message.body as? [String: Any] { receive(body) }
+    }
+}
+
 private final class FaviconResponseStub: URLProtocol, @unchecked Sendable {
-    private static let recorded = OSAllocatedUnfairLock(initialState: [URL]())
+    private struct State {
+        var requests: [URL] = []
+        var onSlowRequest: (@Sendable () -> Void)?
+        var slowResponse: (@Sendable () -> Void)?
+    }
+
+    private static let state = OSAllocatedUnfairLock(initialState: State())
     // A 16×16 ICO with a PNG payload.
     private static let ico = Data(base64Encoded: "AAABAAEAEBAAAAEAIABSAAAAFgAAAIlQTkcNChoKAAAADUlIRFIAAAAQAAAAEAgGAAAAH/P/YQAAABlJREFUeJxj+M8Q+p8SzDBqwKgBowYMFwMAuFhTH4gPtB4AAAAASUVORK5CYII=")!
 
-    static func requests() -> [URL] { recorded.withLock { $0 } }
-    static func reset() { recorded.withLock { $0.removeAll() } }
+    static func requests() -> [URL] { state.withLock { $0.requests } }
+    static func reset() { state.withLock { $0 = State() } }
+
+    static func onSlowRequest(_ notify: @escaping @Sendable () -> Void) {
+        state.withLock { $0.onSlowRequest = notify }
+    }
+
+    static func completeSlowRequest() {
+        let complete = state.withLock { state in
+            defer { state.slowResponse = nil }
+            return state.slowResponse
+        }
+        complete?()
+    }
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
         guard let url = request.url else { return }
-        Self.recorded.withLock { $0.append(url) }
+        let firstRequest = Self.state.withLock { state in
+            let first = !state.requests.contains(url)
+            state.requests.append(url)
+            return first
+        }
         if url.path == "/slow" {
-            Task { @Sendable [self] in
-                try? await Task.sleep(for: .milliseconds(250))
-                sendResponse(for: url)
+            let notify = Self.state.withLock { state in
+                state.slowResponse = { [self] in sendResponse(for: url, firstRequest: firstRequest) }
+                return state.onSlowRequest
             }
+            notify?()
         } else {
-            sendResponse(for: url)
+            sendResponse(for: url, firstRequest: firstRequest)
         }
     }
 
-    private func sendResponse(for url: URL) {
-        if url.path == "/timeout" {
+    private func sendResponse(for url: URL, firstRequest: Bool) {
+        if url.path == "/timeout" || (url.path == "/retry-timeout" && firstRequest) {
             client?.urlProtocol(self, didFailWithError: URLError(.timedOut))
             return
         }
-        let hasImage = url.host == "favicon.test" && ["/favicon.ico", "/working", "/slow"].contains(url.path)
-        let status = hasImage || url.path == "/unreadable" ? 200 : 404
-        let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: nil)!
+        let hasImage = url.host == "favicon.test" && [
+            "/favicon.ico", "/working", "/slow", "/retry-timeout", "/retry-server-error",
+            "/oversized-header", "/oversized-body", "/exact-limit",
+        ].contains(url.path)
+        let status = if url.path == "/retry-server-error" && firstRequest { 503 }
+            else { hasImage || url.path == "/unreadable" ? 200 : 404 }
+        let limit = FaviconLoader.maximumResponseBytes
+        let headers = url.path == "/oversized-header" ? ["Content-Length": String(limit + 1)] : nil
+        let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: headers)!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: hasImage ? Self.ico : Data("not an image".utf8))
+        if url.path == "/oversized-body" || url.path == "/exact-limit" {
+            let padding = limit - Self.ico.count + (url.path == "/oversized-body" ? 1 : 0)
+            client?.urlProtocol(self, didLoad: Data(repeating: 0, count: padding))
+        }
         client?.urlProtocolDidFinishLoading(self)
     }
 

@@ -189,7 +189,7 @@ final class LibraryViewController: UIViewController, ThemeObserving {
     }
 
     func reloadDownloads() {
-        if section == .media { media.reload() }
+        if section == .media { media.reloadFiles() }
         if section == .downloads { reload() }
     }
 

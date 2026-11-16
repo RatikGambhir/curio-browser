@@ -62,6 +62,9 @@ nonisolated enum PageScripts {
         reportMeta();
       }
       window.addEventListener('load', reportMeta, { once: true });
+      window.addEventListener('pageshow', (event) => {
+        if (event.persisted) reportMeta();
+      });
 
       // A press anywhere in the page focuses its pane in a split view. It
       // carries no page data, and is only sent while the native side marks

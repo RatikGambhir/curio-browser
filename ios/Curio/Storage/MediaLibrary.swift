@@ -10,17 +10,19 @@ nonisolated enum MediaLibrary {
     }
 
     @concurrent
-    static func load(includePhotos: Bool, extraDownloads: [URL]) async -> [MediaItem] {
-        let limits = ScanLimits()
-        let files = scanFiles(in: .documentsDirectory, extraDownloads: extraDownloads, limits: limits)
-        guard includePhotos, !Task.isCancelled else { return files }
+    static func loadFiles(extraDownloads: [URL]) async -> [MediaItem] {
+        scanFiles(in: .documentsDirectory, extraDownloads: extraDownloads)
+    }
 
+    @concurrent
+    static func loadPhotos() async -> [MediaItem] {
+        guard !Task.isCancelled else { return [] }
         let options = PHFetchOptions()
         options.predicate = NSPredicate(format: "mediaType IN %@", [
             PHAssetMediaType.image.rawValue, PHAssetMediaType.video.rawValue,
         ])
         options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
-        options.fetchLimit = limits.files
+        options.fetchLimit = ScanLimits().files
         let assets = PHAsset.fetchAssets(with: options)
         var photos: [MediaItem] = []
         photos.reserveCapacity(assets.count)
@@ -28,12 +30,22 @@ nonisolated enum MediaLibrary {
             guard !Task.isCancelled else { break }
             let asset = assets.object(at: index)
             let kind: MediaItem.Kind = asset.mediaType == .video ? .video : .image
-            let name = primaryResource(for: asset)?.originalFilename ?? (kind == .video ? "Video" : "Photo")
-            photos.append(MediaItem(source: .photo(asset), name: name, folder: "Photos", kind: kind,
+            photos.append(MediaItem(source: .photo(asset), name: kind == .video ? "Video" : "Photo", folder: "Photos", kind: kind,
                                     date: asset.creationDate ?? .distantPast, modificationDate: asset.modificationDate,
                                     fileSize: nil))
         }
-        return Array((files + photos).sorted(by: MediaItem.newestFirst).prefix(limits.files))
+        return photos
+    }
+
+    @concurrent
+    static func photoName(for asset: PHAsset) async -> String? {
+        guard !Task.isCancelled else { return nil }
+        return primaryResource(for: asset)?.originalFilename
+    }
+
+    @concurrent
+    static func combined(files: [MediaItem], photos: [MediaItem]) async -> [MediaItem] {
+        Array((files + photos).sorted(by: MediaItem.newestFirst).prefix(ScanLimits().files))
     }
 
     static func primaryResource(for asset: PHAsset) -> PHAssetResource? {

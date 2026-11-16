@@ -322,7 +322,6 @@ extension BrowserTab: WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
-        state.favicon = nil
         urlChanged(webView.url)
         delegate?.tabStateDidChange(self)
         if reportsFocus { applyReportsFocus() }

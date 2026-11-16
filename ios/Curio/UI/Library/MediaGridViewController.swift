@@ -18,7 +18,12 @@ final class MediaGridViewController: UIViewController, UICollectionViewDelegate,
     private var authorization: PHAuthorizationStatus = .notDetermined
     private var authorizationTask: Task<Void, Never>?
     private var scan: Task<Void, Never>?
-    private var needsScan = false
+    private var needsFileScan = false
+    private var needsPhotoScan = false
+    private var photoRefresh: Task<Void, Never>?
+    private var fileItems: [MediaItem] = []
+    private var photoItems: [MediaItem] = []
+    private var photoNames: [MediaItem: String] = [:]
     private var items: [MediaItem] = []
     private var displayedItems: [MediaItem] = []
     private var query = ""
@@ -81,10 +86,16 @@ final class MediaGridViewController: UIViewController, UICollectionViewDelegate,
         } else {
             if canReadPhotos { PHPhotoLibrary.shared().unregisterChangeObserver(self) }
             authorization = .notDetermined
-            needsScan = false
+            needsFileScan = false
+            needsPhotoScan = false
+            photoRefresh?.cancel()
+            photoRefresh = nil
             scan?.cancel()
             preparingFile?.cancel()
             thumbnails.reset()
+            fileItems.removeAll()
+            photoItems.removeAll()
+            photoNames.removeAll()
             items.removeAll()
             updateGrid()
         }
@@ -101,41 +112,81 @@ final class MediaGridViewController: UIViewController, UICollectionViewDelegate,
         reload()
     }
 
-    func reload() {
+    private func reload() {
         guard active else { return }
-        let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
-        if status != authorization {
-            if canReadPhotos { PHPhotoLibrary.shared().unregisterChangeObserver(self) }
-            authorization = status
-            if canReadPhotos { PHPhotoLibrary.shared().register(self) }
-            // Access may have been revoked in Settings while Curio was in the background.
-            items.removeAll(where: \.isFromPhotos)
-            thumbnails.removePhotos()
-            scan?.cancel()
-            preparingFile?.cancel()
-        }
-        needsScan = true
+        updateAuthorization()
+        photoRefresh?.cancel()
+        photoRefresh = nil
+        needsPhotoScan = canReadPhotos
+        reloadFiles()
+    }
+
+    func reloadFiles() {
+        guard active else { return }
+        needsFileScan = true
         startScan()
         updateGrid()
     }
 
+    private func updateAuthorization() {
+        let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        guard status != authorization else { return }
+        if canReadPhotos { PHPhotoLibrary.shared().unregisterChangeObserver(self) }
+        authorization = status
+        if canReadPhotos { PHPhotoLibrary.shared().register(self) }
+        // Access may have been revoked in Settings while Curio was in the background.
+        photoItems.removeAll()
+        photoNames.removeAll()
+        items = fileItems
+        thumbnails.removePhotos()
+        scan?.cancel()
+        preparingFile?.cancel()
+    }
+
     private func startScan() {
-        guard active, needsScan, scan == nil else { return }
-        needsScan = false
-        let includePhotos = canReadPhotos
-        let downloads = downloadURLs()
-        scan = Task { [weak self] in
-            let result = await MediaLibrary.load(includePhotos: includePhotos, extraDownloads: downloads)
+        guard active, scan == nil, needsFileScan || needsPhotoScan else { return }
+        let downloads = needsFileScan ? downloadURLs() : nil
+        let scanPhotos = needsPhotoScan
+        needsFileScan = false
+        needsPhotoScan = false
+        scan = Task { [weak self, fileItems, photoItems] in
+            let files = if let downloads { await MediaLibrary.loadFiles(extraDownloads: downloads) } else { fileItems }
+            let photos = scanPhotos ? await MediaLibrary.loadPhotos() : photoItems
+            let combined = await MediaLibrary.combined(files: files, photos: photos)
             guard let self else { return }
             scan = nil
-            if active, !Task.isCancelled { items = result }
+            if active, !Task.isCancelled {
+                self.fileItems = files
+                self.photoItems = photos
+                if scanPhotos, !photoNames.isEmpty {
+                    let currentPhotos = Set(photos)
+                    photoNames = photoNames.filter { currentPhotos.contains($0.key) }
+                }
+                items = combined
+            } else if active, downloads != nil {
+                needsFileScan = true
+            }
             startScan()
             updateGrid()
         }
     }
 
     nonisolated func photoLibraryDidChange(_ changeInstance: PHChange) {
-        Task { @MainActor [weak self] in self?.reload() }
+        Task { @MainActor [weak self] in self?.schedulePhotoRefresh() }
+    }
+
+    private func schedulePhotoRefresh() {
+        guard active else { return }
+        photoRefresh?.cancel()
+        photoRefresh = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(350))
+            guard let self, active, !Task.isCancelled else { return }
+            photoRefresh = nil
+            updateAuthorization()
+            needsPhotoScan = canReadPhotos
+            startScan()
+            updateGrid()
+        }
     }
 
     private var canReadPhotos: Bool { authorization == .authorized || authorization == .limited }
@@ -163,7 +214,7 @@ final class MediaGridViewController: UIViewController, UICollectionViewDelegate,
     private func updateGrid() {
         guard isViewLoaded else { return }
         let words = query.split(whereSeparator: \.isWhitespace)
-        let visible = active ? (words.isEmpty ? items : items.filter { $0.matches(words) }) : []
+        let visible = active ? (words.isEmpty ? items : items.filter { $0.matches(words, photoName: photoNames[$0]) }) : []
         if displayedItems != visible {
             displayedItems = visible
             var snapshot = NSDiffableDataSourceSnapshot<Int, MediaItem>()
@@ -250,12 +301,16 @@ final class MediaGridViewController: UIViewController, UICollectionViewDelegate,
 
     func collectionView(_ collectionView: UICollectionView, willDisplay cell: UICollectionViewCell,
                         forItemAt indexPath: IndexPath) {
-        if active { (cell as? MediaTileCell)?.loadThumbnail(using: thumbnails) }
+        guard active, let cell = cell as? MediaTileCell, let item = cell.item else { return }
+        cell.loadDetails(using: thumbnails, photoName: photoNames[item]) { [weak self] name in
+            guard let self, active, canReadPhotos, displayedItems.contains(item) else { return }
+            photoNames[item] = name
+        }
     }
 
     func collectionView(_ collectionView: UICollectionView, didEndDisplaying cell: UICollectionViewCell,
                         forItemAt indexPath: IndexPath) {
-        (cell as? MediaTileCell)?.stopThumbnail()
+        (cell as? MediaTileCell)?.stopLoading()
     }
 
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {

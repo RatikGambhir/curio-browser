@@ -30,8 +30,12 @@ nonisolated struct MediaItem: Hashable, Sendable {
     let modificationDate: Date?
     let fileSize: Int?
 
-    func matches(_ words: [Substring]) -> Bool {
-        words.allSatisfy { name.localizedStandardContains($0) || folder.localizedStandardContains($0) }
+    func matches(_ words: [Substring], photoName: String? = nil) -> Bool {
+        let dateText = isFromPhotos && date != .distantPast ? date.formatted(date: .abbreviated, time: .omitted) : nil
+        return words.allSatisfy { word in
+            name.localizedStandardContains(word) || folder.localizedStandardContains(word)
+                || photoName?.localizedStandardContains(word) == true || dateText?.localizedStandardContains(word) == true
+        }
     }
 
     var isFromPhotos: Bool {

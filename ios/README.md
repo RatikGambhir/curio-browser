@@ -36,6 +36,7 @@ The layout follows the space the window has, not the device model, so it adapts 
 Everything from the desktop app, adapted for touch:
 
 - **Browsing** with WebKit (the same engine as the desktop app): back/forward swipes, reload, stop, zoom, print, find in page, downloads (saved to Files › Curio › Downloads), and Safari Web Inspector.
+- **Site icons** use the page’s declared favicon when available and try the site’s `/favicon.ico` before showing a letter tile.
 - **Command bar** for addresses, search, open tabs, history, bookmarks, commands and questions for the assistant. All six search engines plus custom URLs.
 - **Spaces** with their own name, icon, theme, tabs, pinned tabs and folders. Each space picks one of 20 gradient themes (10 light, 10 dark), and the theme decides whether that space's chrome is light or dark; web pages follow the Theme setting. The chrome cross-fades between themes when you switch spaces. Switch spaces with the footer dots or a horizontal swipe (or a two-finger trackpad swipe).
 - **Tabs**: vertical sidebar or horizontal strip, pinned tabs, global favorites, drag and drop to reorder, pin, group, favorite or move tabs, swipe a tab to close or pin it, reopen closed tabs, and tab sleeping to save memory.
@@ -43,6 +44,7 @@ Everything from the desktop app, adapted for touch:
 - **Split view** on iPad and large unfolded displays: show two to four tabs side by side or stacked (⌃⇧=, **Open in Split View** in a tab's menu, or drag a tab onto the left or right half of the page). Tap a pane to focus it, drag the gap to resize (double-tap for equal sizes), and long-press its sidebar row for Stack Panes, Equal Pane Sizes, Remove from Split View and Separate Split View (⌃⇧-). A split stays in its space and folder, moves as one, and is restored on launch. When the window gets too narrow, the focused tab is shown alone and the split comes back when there is room again; regular iPhones always show one page.
 - **Assistant**: streaming Markdown answers with copyable code blocks, chats about the current tab, chosen tabs or the whole space, selection actions (Explain, Summarize, Translate, Ask), quick actions, and saved chat history. Works with Anthropic, OpenAI and OpenAI-compatible servers. API keys are stored in the Keychain.
 - **Library** with Media, Downloads, Spaces and Archived Tabs (newest first, each with its space's dot, and searchable by space name) (plus Notes, Calendar, Clipboard History, Aliases and Inbox placeholders, as on desktop).
+- **Media** browses images and videos in Curio’s Files folder, completed downloads, and the Photos library you grant access to. Tap a tile to preview it, or long-press to share, save to Files or copy it.
 - **Settings** for search, session restore, memory, theme, tab layout, AI providers (with a connection test), privacy and keyboard shortcuts.
 - **Keyboard and menu bar**: every desktop shortcut works with a hardware keyboard, the iPad menu bar shows Curio's menus, and shortcuts can be rebound in Settings.
 - Light and dark themes, Dynamic Type sizes, VoiceOver labels, and Reduce Motion.

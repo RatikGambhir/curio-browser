@@ -7,6 +7,7 @@ final class MediaTileCell: UICollectionViewCell, ThemeObserving {
     private let folder = UILabel()
     private weak var thumbnails: MediaThumbnails?
     private var requestID: UUID?
+    private var nameTask: Task<Void, Never>?
     private(set) var item: MediaItem?
 
     override init(frame: CGRect) {
@@ -53,21 +54,20 @@ final class MediaTileCell: UICollectionViewCell, ThemeObserving {
 
     override func prepareForReuse() {
         super.prepareForReuse()
-        stopThumbnail()
+        stopLoading()
         item = nil
     }
 
     func configure(_ item: MediaItem) {
-        stopThumbnail()
+        stopLoading()
         self.item = item
-        name.text = item.name
         folder.text = item.folder
-        accessibilityLabel = "\(item.name), \(item.folder)"
+        showName(item.name, for: item)
     }
 
-    func loadThumbnail(using thumbnails: MediaThumbnails) {
+    func loadDetails(using thumbnails: MediaThumbnails, photoName: String?, didResolveName: @escaping (String) -> Void) {
         guard let item else { return }
-        stopThumbnail()
+        stopLoading()
         self.thumbnails = thumbnails
         requestID = thumbnails.request(item) { [weak self] image in
             guard let self, self.item == item else { return }
@@ -75,9 +75,30 @@ final class MediaTileCell: UICollectionViewCell, ThemeObserving {
             preview.contentMode = image == nil ? .center : .scaleAspectFill
             preview.image = image ?? (item.kind == .video ? Icon.film : Icon.photo).image(24, weight: .light)
         }
+        guard case .photo(let asset) = item.source else { return }
+        if let photoName {
+            showName(photoName, for: item)
+        } else {
+            nameTask = Task { [weak self] in
+                let name = await MediaLibrary.photoName(for: asset)
+                guard let self, self.item == item, !Task.isCancelled else { return }
+                nameTask = nil
+                if let name {
+                    showName(name, for: item)
+                    didResolveName(name)
+                }
+            }
+        }
     }
 
-    func stopThumbnail() {
+    private func showName(_ title: String, for item: MediaItem) {
+        name.text = title
+        accessibilityLabel = "\(title), \(item.folder)"
+    }
+
+    func stopLoading() {
+        nameTask?.cancel()
+        nameTask = nil
         if let requestID { thumbnails?.cancel(requestID) }
         requestID = nil
         preview.image = nil

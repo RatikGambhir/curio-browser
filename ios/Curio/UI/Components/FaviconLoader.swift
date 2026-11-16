@@ -4,8 +4,13 @@ import UIKit
 /// Downloads and caches favicons, downsampled to icon size.
 final class FaviconLoader {
     static let shared = FaviconLoader()
+    nonisolated static let maximumResponseBytes = 512 * 1024
 
-    // Cache failed candidates too, so another view can go straight to the fallback.
+    nonisolated enum ResponseError: Error {
+        case missing, tooLarge, retryable
+    }
+
+    // Cache definitive misses so another view can go straight to the fallback.
     private let cache = NSCache<NSURL, NSObject>()
     private var inFlight: [URL: Task<UIImage?, Never>] = [:]
     private let session: URLSession
@@ -66,40 +71,62 @@ final class FaviconLoader {
         if let result = cache.object(forKey: url as NSURL) { return result as? UIImage }
         if let task = inFlight[url] { return await task.value }
         let session = session
-        let task = Task<UIImage?, Never> { await Self.download(url, session: session) }
+        let task = Task<UIImage?, Never> {
+            do {
+                let image = try await Self.download(url, session: session)
+                cache.setObject(image, forKey: url as NSURL)
+                return image
+            } catch ResponseError.missing, ResponseError.tooLarge {
+                cache.setObject(NSNull(), forKey: url as NSURL)
+            } catch {
+                // Network failures and temporary HTTP errors can recover on a later request.
+            }
+            return nil
+        }
         inFlight[url] = task
         let image = await task.value
-        cache.setObject(image.map { $0 as NSObject } ?? NSNull(), forKey: url as NSURL)
         inFlight[url] = nil
         return image
     }
 
-    /// Decode and downsample before returning an image to UIKit.
-    @concurrent
-    private nonisolated static func download(_ url: URL, session: URLSession) async -> UIImage? {
-        let source: CGImageSource?
-        do {
-            let (data, response) = try await session.data(from: url)
-            guard let response = response as? HTTPURLResponse, (200..<300).contains(response.statusCode) else { return nil }
-            source = CGImageSourceCreateWithData(data as CFData, nil)
-        } catch let error as URLError where error.code == .appTransportSecurityRequiresSecureConnection {
-            // Browser content can use Curio's existing WebKit transport policy.
-            guard let file = await WebFaviconDownload.file(for: url) else { return nil }
-            defer { try? FileManager.default.removeItem(at: file) }
-            return decode(CGImageSourceCreateWithURL(file as CFURL, nil))
-        } catch {
-            return nil
+    nonisolated static func validate(_ response: URLResponse) throws {
+        guard let response = response as? HTTPURLResponse else { throw ResponseError.retryable }
+        switch response.statusCode {
+        case 200..<300: break
+        case 404, 410: throw ResponseError.missing
+        default: throw ResponseError.retryable
         }
-        return decode(source)
+        guard response.expectedContentLength <= maximumResponseBytes else { throw ResponseError.tooLarge }
     }
 
-    private nonisolated static func decode(_ source: CGImageSource?) -> UIImage? {
+    /// Decode and downsample before returning an image to UIKit.
+    @concurrent
+    private nonisolated static func download(_ url: URL, session: URLSession) async throws -> UIImage {
+        do {
+            let (bytes, response) = try await session.bytes(from: url)
+            defer { bytes.task.cancel() }
+            try validate(response)
+            var data = Data()
+            for try await byte in bytes {
+                guard data.count < maximumResponseBytes else { throw ResponseError.tooLarge }
+                data.append(byte)
+            }
+            return try decode(CGImageSourceCreateWithData(data as CFData, nil))
+        } catch let error as URLError where error.code == .appTransportSecurityRequiresSecureConnection {
+            // Browser content can use Curio's existing WebKit transport policy.
+            let file = try await WebFaviconDownload.file(for: url)
+            defer { try? FileManager.default.removeItem(at: file) }
+            return try decode(CGImageSourceCreateWithURL(file as CFURL, nil))
+        }
+    }
+
+    private nonisolated static func decode(_ source: CGImageSource?) throws -> UIImage {
         guard let source, let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceCreateThumbnailWithTransform: true,
             kCGImageSourceThumbnailMaxPixelSize: 64,
             kCGImageSourceShouldCacheImmediately: true,
-        ] as CFDictionary) else { return nil }
+        ] as CFDictionary) else { throw ResponseError.missing }
         return UIImage(cgImage: thumbnail)
     }
 }
