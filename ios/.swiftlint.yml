@@ -1,0 +1,10 @@
+included:
+  - Curio
+  - CurioTests
+  - CurioUITests
+only_rules:
+  - duplicate_imports
+  - force_cast
+  - force_try
+  - trailing_newline
+  - trailing_whitespace

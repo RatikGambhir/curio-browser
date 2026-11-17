@@ -18,6 +18,7 @@ final class URLPillView: TapControl, ThemeObserving {
         iconView.contentMode = .center
         iconView.setContentHuggingPriority(.required, for: .horizontal)
         label.font = CurioFont.sm()
+        label.accessibilityIdentifier = "browser.address"
         label.adjustsFontForContentSizeCategory = true
         label.lineBreakMode = .byTruncatingTail
         label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -67,6 +68,13 @@ final class URLPillView: TapControl, ThemeObserving {
     }
 
     override var isHighlighted: Bool { didSet { restyle() } }
+
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        guard let hit = super.hitTest(point, with: event) else { return nil }
+        // The layout stack fills the pill. Let the pill handle taps on its
+        // address while the trailing control keeps its own action.
+        return hit === trailingButton || hit.isDescendant(of: trailingButton) ? hit : self
+    }
 
     func themeDidChange(_ theme: CurioTheme) {
         self.theme = theme

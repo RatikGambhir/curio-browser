@@ -10,10 +10,12 @@ Requirements: Xcode 26 or later. [XcodeGen](https://github.com/yonaskolb/XcodeGe
 open ios/Curio.xcodeproj
 ```
 
-Choose the **Curio** scheme and an iPhone or iPad simulator (or your device), then Run. To run the unit tests:
+Choose the **Curio** scheme and an iPhone or iPad simulator (or your device), then Run. The scheme runs unit, integration, snapshot, and UI tests:
 
 ```bash
-xcodebuild test -project ios/Curio.xcodeproj -scheme Curio -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
+xcodebuild test -project ios/Curio.xcodeproj -scheme Curio \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.2' \
+  -parallel-testing-enabled NO
 ```
 
 `project.yml` is the source of truth for the Xcode project. After adding or moving files, regenerate it:
@@ -21,6 +23,8 @@ xcodebuild test -project ios/Curio.xcodeproj -scheme Curio -destination 'platfor
 ```bash
 cd ios && xcodegen generate
 ```
+
+Use `-only-testing:CurioTests` or `-only-testing:CurioUITests` to run one target. UI tests load self-contained pages and use a fresh Debug storage directory per test. The compact browser bar snapshots use an iPhone 17 Pro simulator on iOS 26.2. When an intentional visual change fails a comparison, review the actual and expected images attached to the Xcode test result and replace the matching PNG in `CurioTests/Snapshots`.
 
 ## One app, every screen size
 
@@ -64,7 +68,8 @@ ios/
 │   ├── UI/                Theme, components, window layout, sidebar, page, command bar,
 │   │                      assistant, library, settings, dialogs, commands and menus
 │   └── Resources/         Asset catalog (app icon, logo)
-└── CurioTests/            Unit tests for the core, AI and settings logic
+├── CurioTests/            Unit, integration and snapshot tests
+└── CurioUITests/          Browser flows driven through XCUITest
 ```
 
 `Core` and `AI` are direct ports of the Rust crates (`curio-core`, `curio-tabs`, `curio-spaces`, `curio-settings`, `curio-ai`), with the same behavior and the same tests. Settings and keybinding names match the desktop app.

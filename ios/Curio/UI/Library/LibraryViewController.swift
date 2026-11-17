@@ -63,6 +63,7 @@ final class LibraryViewController: UIViewController, ThemeObserving {
 
         search.textField.addAction(UIAction { [weak self] _ in self?.reload() }, for: .editingChanged)
         search.textField.returnKeyType = .done
+        search.textField.accessibilityIdentifier = "library.search"
         list.axis = .vertical
         list.spacing = 2
         list.translatesAutoresizingMaskIntoConstraints = false
@@ -286,6 +287,7 @@ final class LibraryViewController: UIViewController, ThemeObserving {
                 self?.delegate?.libraryDidClose()
             }
             let reopenHint = "Reopen in \(space?.name ?? workspace.activeSpace.name)"
+            control.accessibilityIdentifier = "library.archiveTab"
             control.addInteraction(UIToolTipInteraction(defaultToolTip: reopenHint))
             if let space {
                 control.row.trailingStack.addArrangedSubview(ColorDotView(color: CurioTheme.swatch(space.gradient)))

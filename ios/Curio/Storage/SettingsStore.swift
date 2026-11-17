@@ -2,12 +2,13 @@ import Foundation
 
 /// The user's preferences, persisted as JSON, with change observers.
 final class SettingsStore {
-    private let file = JSONFile<Settings>("settings.json")
+    private let file: JSONFile<Settings>
     private var observers: [(owner: WeakBox, handler: (Settings) -> Void)] = []
 
     private(set) var settings: Settings
 
-    init() {
+    init(url: URL = StoragePaths.file("settings.json")) {
+        file = JSONFile(url: url)
         settings = (file.load() ?? Settings()).sanitized()
     }
 

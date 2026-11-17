@@ -16,6 +16,9 @@ final class BottomBarView: UIView, ThemeObserving {
 
     init() {
         super.init(frame: .zero)
+        sidebarButton.accessibilityIdentifier = "browser.showTabs"
+        backButton.accessibilityIdentifier = "browser.back"
+        forwardButton.accessibilityIdentifier = "browser.forward"
         moreButton.showsMenuAsPrimaryAction = true
         layer.addSublayer(shade)
         let stack = UIStackView(arrangedSubviews: [sidebarButton, backButton, forwardButton, pill, assistantButton, moreButton])

@@ -6,11 +6,12 @@ final class HistoryStore {
     /// Oldest visits are dropped beyond this many.
     private static let limit = 20_000
 
-    private let file = JSONFile<[HistoryVisit]>("history.json")
+    private let file: JSONFile<[HistoryVisit]>
     private var visits: [HistoryVisit]
     private var saveTask: Task<Void, Never>?
 
-    init() {
+    init(url: URL = StoragePaths.file("history.json")) {
+        file = JSONFile(url: url)
         visits = file.load() ?? []
     }
 

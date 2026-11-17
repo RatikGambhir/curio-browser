@@ -18,6 +18,7 @@ final class TabRowCell: UICollectionViewListCell {
         row.muted = true
         row.setLeading(favicon)
         row.trailingStack.addArrangedSubview(closeButton)
+        closeButton.accessibilityIdentifier = "sidebar.tab.close"
         contentView.addSubview(row)
         NSLayoutConstraint.activate([
             row.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
