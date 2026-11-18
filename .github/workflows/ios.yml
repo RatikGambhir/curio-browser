@@ -38,12 +38,15 @@ jobs:
           languages: swift
           build-mode: manual
       - name: Build for CodeQL
+        timeout-minutes: 15
         run: |
           # CodeQL needs one architecture; generic simulator builds otherwise compile both.
+          # Disable Xcode features that can stall Swift tracing.
           xcodebuild build -project Curio.xcodeproj -scheme Curio \
             -configuration Debug -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath "$RUNNER_TEMP/Curio-CodeQL" \
-            ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO
+            ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO \
+            SWIFT_ENABLE_EXPLICIT_MODULES=NO COMPILER_INDEX_STORE_ENABLE=NO
       - uses: github/codeql-action/analyze@v4
         with:
           category: /language:swift
