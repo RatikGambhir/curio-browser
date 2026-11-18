@@ -205,7 +205,7 @@ final class PaneHeaderView: UIView, ThemeObserving, UIContextMenuInteractionDele
 
     /// Saved tabs (pinned or in a folder) unload (−) instead of closing (×).
     func configure(_ model: TabViewModel) {
-        favicon.configure(label: model.title, url: model.favicon, loading: model.loading)
+        favicon.configure(label: model.title, url: model.favicon, pageURL: model.url, loading: model.loading)
         title.text = model.title
         closeButton.setIcon(model.saved ? .minus : .close, label: model.saved ? "Unload Tab" : "Close Tab")
         accessibilityElements = [title, removeButton, closeButton]
@@ -253,7 +253,7 @@ final class PanePlaceholderView: UIView, ThemeObserving {
     }
 
     func configure(_ model: TabViewModel) {
-        favicon.configure(label: model.title, url: model.favicon, loading: model.loading)
+        favicon.configure(label: model.title, url: model.favicon, pageURL: model.url, loading: model.loading)
         title.text = model.title
     }
 }

@@ -376,7 +376,7 @@ final class AssistantViewController: UIViewController, ThemeObserving {
         } else {
             for tab in contextTabs {
                 let favicon = FaviconView(size: 12)
-                favicon.configure(label: tab.title, url: tab.favicon)
+                favicon.configure(label: tab.title, url: tab.favicon, pageURL: tab.url)
                 let isCurrent = tab.id == currentTab?.id
                 chips.append(ContextChipView(title: tab.title.isEmpty ? Curio.displayHost(tab.url) : tab.title, leading: favicon,
                                              active: true, removable: true, tooltip: tab.url) { [weak self] in

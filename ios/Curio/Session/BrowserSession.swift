@@ -22,13 +22,7 @@ final class BrowserSession {
 
     init(services: AppServices) {
         self.services = services
-        let restored = services.settings.settings.browsing.restoreSession ? services.workspaceStore.load() : nil
-        workspace = restored ?? .firstRun()
-        if restored == nil, let saved = services.workspaceStore.load() {
-            // Not restoring tabs still keeps spaces, saved tabs (pinned and in
-            // folders), folders and favorites.
-            workspace = Self.withoutRegularTabs(saved)
-        }
+        workspace = services.workspaceStore.load(restoreSession: services.settings.settings.browsing.restoreSession)
         maintenanceTask = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(60))
@@ -44,17 +38,6 @@ final class BrowserSession {
 
     var settings: Settings { services.settings.settings }
 
-    private static func withoutRegularTabs(_ saved: Workspace) -> Workspace {
-        var workspace = saved
-        for space in saved.spaces {
-            for case .tab(let id) in space.strip.items(.unpinned) {
-                _ = workspace.closeTab(id)
-            }
-            workspace.updateSpace(space.id) { $0.activeTab = $0.strip.orderedTabIDs.first }
-        }
-        return Workspace(spaces: workspace.spaces, favorites: workspace.favorites)
-    }
-
     // MARK: - Reading state
 
     var activeTabID: UUID? { workspace.activeTabID }
@@ -67,6 +50,7 @@ final class BrowserSession {
         return TabViewModel(
             id: id,
             title: tab.displayTitle,
+            url: tab.url,
             favicon: tab.faviconURL,
             active: workspace.activeTabID == id,
             pinned: workspace.activeSpace.strip.isPinned(id),
@@ -940,8 +924,8 @@ extension BrowserSession: BrowserTabDelegate {
                     changed = true
                     titleChanged = true
                 }
-                if let favicon = state.favicon, model.faviconURL != favicon {
-                    model.faviconURL = favicon
+                if model.faviconURL != state.favicon {
+                    model.faviconURL = state.favicon
                     changed = true
                 }
             }

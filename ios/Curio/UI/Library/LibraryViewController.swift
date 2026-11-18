@@ -5,18 +5,23 @@ import UIKit
 /// sheet on phones.
 final class LibraryViewController: UIViewController, ThemeObserving {
     static let railWidth: CGFloat = 84
-    private static let imageExtensions: Set<String> = ["png", "jpg", "jpeg", "gif", "webp", "heic", "svg", "bmp"]
-    private static let videoExtensions: Set<String> = ["mp4", "mov", "m4v", "webm", "mkv"]
 
     private let session: BrowserSession
     weak var delegate: LibraryDelegate?
-    private var section: LibrarySection = .archivedTabs
+    private(set) var section: LibrarySection = .archivedTabs
+    private var visible = false
     private let rail = UIStackView()
     private var railItems: [LibrarySection: RailItemView] = [:]
     private let search = SearchFieldView(placeholder: LibrarySection.archivedTabs.searchPlaceholder)
     private let sectionLabel = SectionLabel(LibrarySection.archivedTabs.label)
     private let scroll = UIScrollView()
     private let list = UIStackView()
+    private lazy var media = MediaGridViewController(allowsThreeColumns: !presentedAsSheet, downloadURLs: { [weak self] in
+        guard let records = self?.session.services.downloads.records else { return [] }
+        return records.prefix(200).compactMap { $0.state == .completed ? $0.fileURL : nil }
+    }, previewFile: { [weak self] file in
+        self?.delegate?.libraryPreview(file.url, retaining: file)
+    })
     private let closeButton = IconButton(.back, label: "Back to Sidebar")
     /// In a sheet the close button reads "Done".
     var presentedAsSheet = false {
@@ -35,7 +40,11 @@ final class LibraryViewController: UIViewController, ThemeObserving {
         rail.axis = .vertical
         rail.spacing = 4
         for item in LibrarySection.allCases {
-            let view = RailItemView(icon: item.icon, title: item.label, action: UIAction { [weak self] _ in self?.select(item) })
+            let view = RailItemView(icon: item.icon, title: item.label, action: UIAction { [weak self] _ in
+                guard let self else { return }
+                select(item)
+                if presentedAsSheet { delegate?.librarySheetDidSelect(item) }
+            })
             railItems[item] = view
             rail.addArrangedSubview(view)
         }
@@ -54,6 +63,7 @@ final class LibraryViewController: UIViewController, ThemeObserving {
 
         search.textField.addAction(UIAction { [weak self] _ in self?.reload() }, for: .editingChanged)
         search.textField.returnKeyType = .done
+        search.textField.accessibilityIdentifier = "library.search"
         list.axis = .vertical
         list.spacing = 2
         list.translatesAutoresizingMaskIntoConstraints = false
@@ -68,6 +78,11 @@ final class LibraryViewController: UIViewController, ThemeObserving {
         pane.addSubview(search)
         pane.addSubview(sectionLabel)
         pane.addSubview(scroll)
+        addChild(media)
+        let mediaView: UIView = media.view
+        mediaView.translatesAutoresizingMaskIntoConstraints = false
+        pane.addSubview(mediaView)
+        media.didMove(toParent: self)
         view.addSubview(railColumn)
         view.addSubview(pane)
         NSLayoutConstraint.activate([
@@ -95,6 +110,10 @@ final class LibraryViewController: UIViewController, ThemeObserving {
             scroll.trailingAnchor.constraint(equalTo: pane.trailingAnchor),
             scroll.topAnchor.constraint(equalTo: sectionLabel.bottomAnchor, constant: 6),
             scroll.bottomAnchor.constraint(equalTo: pane.bottomAnchor),
+            mediaView.leadingAnchor.constraint(equalTo: scroll.leadingAnchor),
+            mediaView.trailingAnchor.constraint(equalTo: scroll.trailingAnchor),
+            mediaView.topAnchor.constraint(equalTo: scroll.topAnchor),
+            mediaView.bottomAnchor.constraint(equalTo: pane.bottomAnchor),
             list.leadingAnchor.constraint(equalTo: scroll.frameLayoutGuide.leadingAnchor, constant: 4),
             list.trailingAnchor.constraint(equalTo: scroll.frameLayoutGuide.trailingAnchor, constant: -10),
             list.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor),
@@ -102,7 +121,22 @@ final class LibraryViewController: UIViewController, ThemeObserving {
             list.heightAnchor.constraint(greaterThanOrEqualTo: scroll.frameLayoutGuide.heightAnchor, constant: -10),
         ])
         ThemeCenter.shared.observe(self)
-        select(.archivedTabs)
+        select(section)
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        if presentedAsSheet { setVisible(true) }
+    }
+
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        if presentedAsSheet { setVisible(false) }
+    }
+
+    func setVisible(_ visible: Bool) {
+        self.visible = visible
+        if isViewLoaded { media.setActive(visible && section == .media) }
     }
 
     func themeDidChange(_ theme: CurioTheme) {
@@ -111,21 +145,28 @@ final class LibraryViewController: UIViewController, ThemeObserving {
 
     func select(_ section: LibrarySection) {
         self.section = section
+        guard isViewLoaded else { return }
         for (item, view) in railItems { view.isSelected = item == section }
         search.textField.text = ""
         search.textField.placeholder = section.searchPlaceholder
         search.themeDidChange(ThemeCenter.shared.theme)
         sectionLabel.text = section.label
+        scroll.isHidden = section == .media
+        media.view.isHidden = section != .media
         reload()
+        media.setActive(visible && section == .media)
     }
 
     /// Rebuilds the list for the current section and search.
     func reload() {
         guard isViewLoaded else { return }
-        list.arrangedSubviews.forEach { $0.removeFromSuperview() }
         let query = (search.textField.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if section == .media {
+            media.setQuery(query)
+            return
+        }
+        list.arrangedSubviews.forEach { $0.removeFromSuperview() }
         let rows: [UIView] = switch section {
-        case .media: mediaRows(query)
         case .downloads: downloadRows(query)
         case .spaces: spaceRows(query)
         case .archivedTabs: archiveRows(query)
@@ -148,12 +189,17 @@ final class LibraryViewController: UIViewController, ThemeObserving {
         }
     }
 
+    func reloadDownloads() {
+        if section == .media { media.reloadFiles() }
+        if section == .downloads { reload() }
+    }
+
     private static func matches(_ query: String, _ fields: [String]) -> Bool {
         query.split(whereSeparator: \.isWhitespace).allSatisfy { word in fields.contains { $0.localizedStandardContains(word) } }
     }
 
-    private func row(title: String, subtitle: String?, favicon: String?, label: String, icon: Icon? = nil, iconColor: UIColor? = nil,
-                     action: @escaping () -> Void) -> ListRowControl {
+    private func row(title: String, subtitle: String?, favicon: String?, pageURL: String? = nil, label: String,
+                     icon: Icon? = nil, iconColor: UIColor? = nil, action: @escaping () -> Void) -> ListRowControl {
         let control = ListRowControl(height: 44, action: UIAction { _ in action() })
         if let icon {
             let view = UIImageView(image: icon.image(14))
@@ -163,7 +209,7 @@ final class LibraryViewController: UIViewController, ThemeObserving {
             control.row.setLeading(view)
         } else {
             let view = FaviconView(size: 16)
-            view.configure(label: label, url: favicon)
+            view.configure(label: label, url: favicon, pageURL: pageURL)
             control.row.setLeading(view)
         }
         control.row.setTitle(title, subtitle: subtitle)
@@ -183,31 +229,6 @@ final class LibraryViewController: UIViewController, ThemeObserving {
                 if record.state == .completed, let url = record.fileURL { self?.delegate?.libraryPreview(url) }
             }
         }
-    }
-
-    private func mediaRows(_ query: String) -> [UIView] {
-        let items = session.services.downloads.records.compactMap { record -> (String, URL, Bool)? in
-            guard record.state == .completed, let url = record.fileURL else { return nil }
-            let ext = url.pathExtension.lowercased()
-            let image = Self.imageExtensions.contains(ext)
-            guard image || Self.videoExtensions.contains(ext), Self.matches(query, [record.displayName, record.url]) else { return nil }
-            return (record.displayName, url, image)
-        }
-        var rows: [UIView] = []
-        var index = 0
-        while index < items.count {
-            let pair = items[index..<min(index + 2, items.count)].map { name, url, image in
-                MediaTileView(name: name, url: url, image: image, action: UIAction { [weak self] _ in self?.delegate?.libraryPreview(url) }) as UIView
-            }
-            let row = UIStackView(arrangedSubviews: pair.count == 2 ? pair : pair + [UIView()])
-            row.spacing = 8
-            row.distribution = .fillEqually
-            row.alignment = .top
-            rows.append(row)
-            index += 2
-        }
-        if !rows.isEmpty { list.spacing = 10 } else { list.spacing = 2 }
-        return rows
     }
 
     private func spaceRows(_ query: String) -> [UIView] {
@@ -241,7 +262,8 @@ final class LibraryViewController: UIViewController, ThemeObserving {
             header.row.trailingStack.addArrangedSubview(count)
             rows.append(header)
             for tab in tabs {
-                let tabRow = row(title: tab.displayTitle, subtitle: Curio.displayHost(tab.url), favicon: tab.faviconURL, label: tab.displayTitle) { [weak self] in
+                let tabRow = row(title: tab.displayTitle, subtitle: Curio.displayHost(tab.url),
+                                 favicon: tab.faviconURL, pageURL: tab.url, label: tab.displayTitle) { [weak self] in
                     self?.session.activateTab(tab.id)
                     self?.delegate?.libraryDidClose()
                 }
@@ -254,18 +276,26 @@ final class LibraryViewController: UIViewController, ThemeObserving {
 
     private func archiveRows(_ query: String) -> [UIView] {
         list.spacing = 2
-        return session.workspace.archivedTabs(matching: query).map { closed, space in
+        let workspace = session.workspace
+        return workspace.archivedTabs(matching: query).map { closed, space in
             let host = Curio.displayHost(closed.tab.url)
             let title = closed.tab.displayTitle
-            let control = row(title: title, subtitle: "\(host) · \(space.name)", favicon: closed.tab.faviconURL, label: title) { [weak self] in
+            let subtitle = space.map { "\(host) · \($0.name)" } ?? host
+            let control = row(title: title, subtitle: subtitle,
+                              favicon: closed.tab.faviconURL, pageURL: closed.tab.url, label: title) { [weak self] in
                 self?.session.reopenArchivedTab(closed.tab.id)
                 self?.delegate?.libraryDidClose()
             }
-            // The space's dot, so it's clear at a glance where the tab was.
-            control.row.trailingStack.addArrangedSubview(ColorDotView(color: CurioTheme.swatch(space.gradient)))
-            control.toolTip = "Reopen in \(space.name)"
-            control.accessibilityLabel = "\(title), \(host), closed in \(space.name)"
-            control.accessibilityHint = "Reopens the tab in \(space.name)"
+            let reopenHint = "Reopen in \(space?.name ?? workspace.activeSpace.name)"
+            control.accessibilityIdentifier = "library.archiveTab"
+            control.addInteraction(UIToolTipInteraction(defaultToolTip: reopenHint))
+            if let space {
+                control.row.trailingStack.addArrangedSubview(ColorDotView(color: CurioTheme.swatch(space.gradient)))
+                control.accessibilityLabel = "\(title), \(host), closed in \(space.name)"
+                control.accessibilityHint = "Reopens the tab in \(space.name)"
+            } else {
+                control.accessibilityHint = reopenHint
+            }
             return control
         }
     }

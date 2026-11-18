@@ -51,6 +51,7 @@ nonisolated enum PageScripts {
         const usable = icons.filter((l) => l.href && score(l) >= 0).sort((a, b) => score(b) - score(a));
         const theme = document.querySelector('meta[name="theme-color"]');
         send('meta', {
+          url: location.href,
           favicon: usable.length ? usable[0].href : null,
           themeColor: theme ? theme.content : null,
         });
@@ -61,6 +62,9 @@ nonisolated enum PageScripts {
         reportMeta();
       }
       window.addEventListener('load', reportMeta, { once: true });
+      window.addEventListener('pageshow', (event) => {
+        if (event.persisted) reportMeta();
+      });
 
       // A press anywhere in the page focuses its pane in a split view. It
       // carries no page data, and is only sent while the native side marks

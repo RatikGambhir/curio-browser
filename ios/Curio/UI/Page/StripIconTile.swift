@@ -25,7 +25,7 @@ final class StripIconTile: TapControl, ThemeObserving {
             self?.restyle()
         }
         ThemeCenter.shared.observe(self)
-        favicon.configure(label: model.title, url: model.favicon, loading: model.loading)
+        favicon.configure(label: model.title, url: model.favicon, pageURL: model.url, loading: model.loading)
         active = model.active
         toolTip = model.title
         accessibilityLabel = model.title

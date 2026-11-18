@@ -62,7 +62,7 @@ final class StripTabView: TapControl, ThemeObserving, UIDragInteractionDelegate 
     func configure(_ model: TabViewModel) {
         self.model = model
         label.text = model.title
-        favicon.configure(label: model.title, url: model.favicon, loading: model.loading)
+        favicon.configure(label: model.title, url: model.favicon, pageURL: model.url, loading: model.loading)
         accessibilityLabel = model.title
         accessibilityTraits = model.active ? [.button, .selected] : .button
         // Saved tabs (pinned or in a folder) unload (−) while their page is live.

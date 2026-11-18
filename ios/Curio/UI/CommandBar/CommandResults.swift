@@ -47,7 +47,7 @@ struct CommandResults {
             for tab in tabs.filter({ Self.matchesAll(query, "\($0.title) \($0.url)") }).prefix(5) {
                 seen.insert(tab.url)
                 let host = Curio.displayHost(tab.url)
-                items.append(CommandItem(key: "tab:\(tab.id)", leading: .site(favicon: tab.favicon, label: tab.title),
+                items.append(CommandItem(key: "tab:\(tab.id)", leading: .site(favicon: tab.favicon, pageURL: tab.url, label: tab.title),
                                          title: tab.title.isEmpty ? host : tab.title, subtitle: "\(tab.space) · \(host)",
                                          badge: "Switch to Tab", target: .switchTab(tab.id)))
             }
@@ -61,7 +61,7 @@ struct CommandResults {
         if !query.isEmpty {
             for bookmark in bookmarks.search(query, limit: 4) where seen.insert(bookmark.url).inserted {
                 let host = Curio.displayHost(bookmark.url)
-                items.append(CommandItem(key: "bm:\(bookmark.url)", leading: .site(favicon: nil, label: host),
+                items.append(CommandItem(key: "bm:\(bookmark.url)", leading: .site(favicon: nil, pageURL: nil, label: host),
                                          title: bookmark.title.isEmpty ? host : bookmark.title, subtitle: bookmark.url,
                                          badge: "Bookmark", target: .navigate(url: bookmark.url, newTab: newTab)))
             }
@@ -70,7 +70,7 @@ struct CommandResults {
         let history = query.isEmpty ? self.history.recent(limit: 30) : self.history.search(query, limit: 8)
         for entry in history.filter({ seen.insert($0.url).inserted }).prefix(6) {
             let host = Curio.displayHost(entry.url)
-            items.append(CommandItem(key: "hist:\(entry.url)", leading: .site(favicon: nil, label: host),
+            items.append(CommandItem(key: "hist:\(entry.url)", leading: .site(favicon: nil, pageURL: entry.url, label: host),
                                      title: entry.title.isEmpty ? host : entry.title, subtitle: entry.url,
                                      badge: query.isEmpty ? "Recent" : "History", target: .navigate(url: entry.url, newTab: newTab)))
         }

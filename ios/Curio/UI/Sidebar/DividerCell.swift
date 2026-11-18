@@ -33,6 +33,7 @@ final class DividerCell: UICollectionViewListCell, ThemeObserving {
         HoverTracker(newTabRow) { [weak self] in self?.newTabRow.isHovered = $0 }
         isAccessibilityElement = true
         accessibilityLabel = "New Tab"
+        accessibilityIdentifier = "sidebar.newTab"
         accessibilityTraits = .button
         ThemeCenter.shared.observe(self)
     }

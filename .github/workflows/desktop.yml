@@ -1,0 +1,76 @@
+name: Desktop CI
+
+on:
+  push:
+    paths:
+      - 'browser/**'
+      - '.github/workflows/desktop.yml'
+  pull_request:
+    paths:
+      - 'browser/**'
+      - '.github/workflows/desktop.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: browser
+
+jobs:
+  codeql:
+    name: Desktop / CodeQL
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install stable --profile minimal
+      - run: rustup default stable
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: rust
+          build-mode: none
+          source-root: browser
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:rust
+
+  test:
+    name: Desktop / test
+    runs-on: macos-26
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install stable --profile minimal
+      - run: cargo +stable test --locked --workspace --exclude curio-app
+
+  build:
+    name: Desktop / build
+    runs-on: macos-26
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install stable --profile minimal
+      - run: cargo +stable build --locked --release -p curio-app
+
+  lint:
+    name: Desktop / lint
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+      - run: cargo +stable fmt --all --check
+      - run: cargo +stable clippy --locked --workspace --all-targets

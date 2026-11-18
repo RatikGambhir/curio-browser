@@ -67,12 +67,13 @@ final class CommandRowCell: UICollectionViewListCell {
             iconView.image = icon.image(13)
             iconView.isHidden = false
             favicon.isHidden = true
+            favicon.prepareForReuse()
             iconBox.backgroundColor = (selected ? theme.accentSoft : theme.rowHover).uiColor
             iconView.tintColor = (selected ? theme.accentText : theme.textMuted).uiColor
-        case .site(let url, let label):
+        case .site(let url, let pageURL, let label):
             iconView.isHidden = true
             favicon.isHidden = false
-            favicon.configure(label: label, url: url)
+            favicon.configure(label: label, url: url, pageURL: pageURL)
             iconBox.backgroundColor = .clear
         }
         badge.text = item.badge

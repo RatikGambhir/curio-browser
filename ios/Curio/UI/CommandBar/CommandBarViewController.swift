@@ -81,6 +81,7 @@ final class CommandBarViewController: UIViewController, UITextFieldDelegate, UIC
         field.setContentHuggingPriority(.defaultLow, for: .horizontal)
         hint.setContentHuggingPriority(.required, for: .horizontal)
         field.accessibilityLabel = "Search or enter address"
+        field.accessibilityIdentifier = "commandBar.input"
         field.addAction(UIAction { [weak self] _ in self?.rebuild() }, for: .editingChanged)
         hint.isHidden = compact
         let header = UIStackView(arrangedSubviews: [modeIcon, field, hint])

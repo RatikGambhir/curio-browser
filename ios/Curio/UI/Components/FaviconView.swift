@@ -3,16 +3,23 @@ import UIKit
 /// A site icon: the favicon when it loads, otherwise a colored letter tile
 /// (stable per site), or a spinner while the page loads.
 final class FaviconView: UIView, ThemeObserving {
+    private struct Request: Equatable {
+        let pageURL: String?
+        let iconURL: String?
+    }
+
     private let imageView = UIImageView()
     private let letterLabel = UILabel()
     private let spinner = UIActivityIndicatorView(style: .medium)
+    private let loader: FaviconLoader
     private var size: CGFloat
     private var sizeConstraints: [NSLayoutConstraint] = []
     private var loadTask: Task<Void, Never>?
-    private var currentURL: String?
+    private var currentRequest: Request?
 
-    init(size: CGFloat = 16) {
+    init(size: CGFloat = 16, loader: FaviconLoader = .shared) {
         self.size = size
+        self.loader = loader
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         isAccessibilityElement = false
@@ -45,6 +52,10 @@ final class FaviconView: UIView, ThemeObserving {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    deinit {
+        loadTask?.cancel()
+    }
+
     func setSize(_ size: CGFloat) {
         self.size = size
         applySize()
@@ -63,47 +74,45 @@ final class FaviconView: UIView, ThemeObserving {
         spinner.color = theme.accent.uiColor
     }
 
-    /// Shows `url`'s icon (or the letter for `label`), or a spinner.
-    func configure(label: String, url: String?, loading: Bool = false) {
+    /// Shows the declared or conventional site icon, or the letter for `label`.
+    func configure(label: String, url: String?, pageURL: String? = nil, loading: Bool = false) {
         letterLabel.text = Self.initial(label)
         letterLabel.backgroundColor = Self.letterColor(label)
         if loading {
+            guard !spinner.isAnimating else { return }
+            prepareForReuse()
             spinner.startAnimating()
-            imageView.isHidden = true
             letterLabel.isHidden = true
             return
         }
         spinner.stopAnimating()
-        guard let url, !url.isEmpty else {
-            loadTask?.cancel()
-            currentURL = nil
-            showLetter()
-            return
-        }
-        if url == currentURL, imageView.image != nil {
-            imageView.isHidden = false
-            letterLabel.isHidden = true
-            return
-        }
-        currentURL = url
-        if let image = FaviconLoader.shared.cached(url) {
+        let request = Request(pageURL: pageURL, iconURL: url)
+        guard request != currentRequest else { return }
+        currentRequest = request
+        loadTask?.cancel()
+        loadTask = nil
+        let candidates = FaviconLoader.candidates(declared: url, pageURL: pageURL)
+        if let image = loader.cachedImage(for: candidates) {
             show(image)
             return
         }
         showLetter()
-        loadTask?.cancel()
-        loadTask = Task { [weak self] in
-            let image = await FaviconLoader.shared.image(for: url)
-            guard !Task.isCancelled, let self, self.currentURL == url, let image else { return }
-            show(image)
+        guard !candidates.isEmpty else { return }
+        loadTask = Task { [weak self, loader] in
+            let image = await loader.image(for: candidates)
+            guard !Task.isCancelled, let self, currentRequest == request else { return }
+            loadTask = nil
+            if let image { show(image) }
         }
     }
 
     /// Resets state before a reused cell shows another site.
     func prepareForReuse() {
         loadTask?.cancel()
-        currentURL = nil
-        imageView.image = nil
+        loadTask = nil
+        currentRequest = nil
+        spinner.stopAnimating()
+        showLetter()
     }
 
     private func show(_ image: UIImage) {

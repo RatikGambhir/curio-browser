@@ -170,7 +170,7 @@ final class SplitSegmentView: UIView, ThemeObserving {
         paneFocused = model.active
         title.text = model.title
         title.font = CurioFont.sm(model.active ? .medium : .regular)
-        favicon.configure(label: model.title, url: model.favicon, loading: model.loading)
+        favicon.configure(label: model.title, url: model.favicon, pageURL: model.url, loading: model.loading)
         favicon.alpha = model.asleep && !model.active ? 0.65 : 1
         restyle()
     }

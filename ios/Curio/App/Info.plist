@@ -41,6 +41,10 @@
 	<string>Websites you visit can ask to use the microphone.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Curio saves images you choose to your photo library.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Curio reads the photos and videos you allow so you can browse them in Media.</string>
+	<key>PHPhotoLibraryPreventAutomaticLimitedAccessAlert</key>
+	<true/>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

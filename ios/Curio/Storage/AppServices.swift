@@ -11,11 +11,13 @@ final class AppServices {
     let downloads: DownloadStore
     let keychain: KeychainStore
 
-    init() {
+    init(settings: SettingsStore = SettingsStore(),
+         workspaceStore: WorkspaceStore = WorkspaceStore(),
+         history: HistoryStore = HistoryStore()) {
         StoragePaths.ensureDirectories()
-        settings = SettingsStore()
-        workspaceStore = WorkspaceStore()
-        history = HistoryStore()
+        self.settings = settings
+        self.workspaceStore = workspaceStore
+        self.history = history
         bookmarks = BookmarkStore()
         conversations = ConversationStore()
         downloads = DownloadStore()

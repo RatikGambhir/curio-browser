@@ -4,6 +4,8 @@ import UIKit
 /// tabs with folders, and the space switcher. Hosted as a column on wide
 /// screens and as a drawer on narrow ones.
 final class SidebarViewController: UIViewController, ThemeObserving {
+    private static let favoriteGridInset: CGFloat = 10
+    private static let favoriteGap: CGFloat = 6
     private let session: BrowserSession
     weak var delegate: SidebarDelegate? {
         didSet { menus.delegate = delegate }
@@ -12,6 +14,7 @@ final class SidebarViewController: UIViewController, ThemeObserving {
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<SidebarSection, SidebarItem>!
     private let footer = SidebarFooterView()
+    private var favoriteColumns = 4
     private var tabRows: [SidebarItem] = []
     private var lastSpace: UUID?
     private var swipeTranslation: CGFloat = 0
@@ -79,18 +82,35 @@ final class SidebarViewController: UIViewController, ThemeObserving {
 
     // MARK: - Layout
 
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        let width = collectionView.bounds.inset(by: collectionView.adjustedContentInset).width
+        guard width > 0 else { return }
+        let innerWidth = width - 2 * Self.favoriteGridInset
+        let columns = innerWidth >= 4 * 48 + 3 * Self.favoriteGap ? 4 : 3
+        guard columns != favoriteColumns else { return }
+        favoriteColumns = columns
+        reload(animated: false, reconfigure: false)
+    }
+
     private func makeLayout() -> UICollectionViewLayout {
         UICollectionViewCompositionalLayout { [weak self] index, environment in
             guard let self, let section = SidebarSection(rawValue: index) else { return nil }
             switch section {
             case .favorites:
-                let item = NSCollectionLayoutItem(layoutSize: .init(widthDimension: .fractionalWidth(0.25), heightDimension: .absolute(44)))
-                item.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 3, bottom: 0, trailing: 3)
-                let group = NSCollectionLayoutGroup.horizontal(layoutSize: .init(widthDimension: .fractionalWidth(1), heightDimension: .absolute(44)), subitems: [item])
+                let item = NSCollectionLayoutItem(layoutSize: .init(
+                    widthDimension: .fractionalWidth(1 / CGFloat(favoriteColumns)),
+                    heightDimension: .fractionalHeight(1)
+                ))
+                let group = NSCollectionLayoutGroup.horizontal(
+                    layoutSize: .init(widthDimension: .fractionalWidth(1), heightDimension: .absolute(Metrics.minTouch)),
+                    repeatingSubitem: item,
+                    count: favoriteColumns
+                )
+                group.interItemSpacing = .fixed(Self.favoriteGap)
                 let layout = NSCollectionLayoutSection(group: group)
-                layout.interGroupSpacing = 6
-                let hasFavorites = !session.workspace.favorites.isEmpty
-                layout.contentInsets = NSDirectionalEdgeInsets(top: 2, leading: 7, bottom: hasFavorites ? 8 : 0, trailing: 7)
+                layout.interGroupSpacing = 4
+                layout.contentInsets = NSDirectionalEdgeInsets(top: 2, leading: Self.favoriteGridInset, bottom: 8, trailing: Self.favoriteGridInset)
                 return layout
             case .header:
                 let size = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1), heightDimension: .absolute(compact ? 40 : 34))
@@ -118,9 +138,15 @@ final class SidebarViewController: UIViewController, ThemeObserving {
     private var rowHeight: CGFloat { Metrics.rowHeight(compact: compact) }
 
     private func configureDataSource() {
-        let favoriteCell = UICollectionView.CellRegistration<FavoriteTileCell, UUID> { [weak self] cell, _, id in
-            guard let self, let model = session.tabViewModel(id) else { return }
-            cell.configure(model)
+        let favoriteCell = UICollectionView.CellRegistration<FavoriteTileCell, SidebarItem> { [weak self] cell, _, item in
+            switch item {
+            case .favorite(let id):
+                if let model = self?.session.tabViewModel(id) { cell.configure(model) }
+            case .addFavorite:
+                cell.configureAddSlot()
+            default:
+                break
+            }
         }
         let headerCell = UICollectionView.CellRegistration<SpaceHeaderCell, UUID> { [weak self] cell, _, id in
             guard let self, let space = session.workspace.space(id) else { return }
@@ -151,8 +177,8 @@ final class SidebarViewController: UIViewController, ThemeObserving {
         let emptyCell = UICollectionView.CellRegistration<EmptyHintCell, Bool> { _, _, _ in }
         dataSource = UICollectionViewDiffableDataSource(collectionView: collectionView) { [weak self] collectionView, indexPath, item in
             switch item {
-            case .favorite(let id):
-                return collectionView.dequeueConfiguredReusableCell(using: favoriteCell, for: indexPath, item: id)
+            case .favorite, .addFavorite:
+                return collectionView.dequeueConfiguredReusableCell(using: favoriteCell, for: indexPath, item: item)
             case .header(let id):
                 return collectionView.dequeueConfiguredReusableCell(using: headerCell, for: indexPath, item: id)
             case .tab(let id):
@@ -184,7 +210,11 @@ final class SidebarViewController: UIViewController, ThemeObserving {
         }
         var snapshot = NSDiffableDataSourceSnapshot<SidebarSection, SidebarItem>()
         snapshot.appendSections(SidebarSection.allCases)
-        snapshot.appendItems(workspace.favorites.map { .favorite($0.tab.id) }, toSection: .favorites)
+        var favorites = workspace.favorites.map { SidebarItem.favorite($0.tab.id) }
+        if favorites.isEmpty || !favorites.count.isMultiple(of: favoriteColumns) {
+            favorites.append(.addFavorite)
+        }
+        snapshot.appendItems(favorites, toSection: .favorites)
         snapshot.appendItems([.header(space.id)], toSection: .header)
         var rows: [SidebarItem] = []
         var dividerDone = false
@@ -404,6 +434,8 @@ extension SidebarViewController: UICollectionViewDelegate {
         case .favorite(let id), .tab(let id):
             session.activateTab(id)
             delegate?.sidebarDidActivateTab()
+        case .addFavorite:
+            if let active = session.activeTabID { session.addFavorite(active) }
         case .group(let id):
             let collapsed = session.workspace.activeSpace.strip.group(id)?.collapsed ?? false
             session.setGroupCollapsed(id, !collapsed)
@@ -423,6 +455,7 @@ extension SidebarViewController: UICollectionViewDelegate {
         let menu: () -> UIMenu?
         switch item {
         case .favorite(let id): menu = { menus.favoriteMenu(tab: id) }
+        case .addFavorite: return nil
         case .tab(let id): menu = { menus.tabMenu(id) }
         case .split(let id):
             let cellPoint = collectionView.cellForItem(at: indexPath).map { collectionView.convert(point, to: $0) }
@@ -442,6 +475,18 @@ extension SidebarViewController: UICollectionViewDelegate {
 // MARK: - Drag and drop
 
 extension SidebarViewController: UICollectionViewDragDelegate, UICollectionViewDropDelegate {
+    /// Includes the gaps and unused cells in the last row.
+    private func isOverFavorites(_ session: UIDropSession) -> Bool {
+        let section = SidebarSection.favorites.rawValue
+        let count = collectionView.numberOfItems(inSection: section)
+        guard count > 0,
+              let first = collectionView.layoutAttributesForItem(at: IndexPath(item: 0, section: section)),
+              let last = collectionView.layoutAttributesForItem(at: IndexPath(item: count - 1, section: section))
+        else { return false }
+        let y = session.location(in: collectionView).y
+        return y >= first.frame.minY && y < last.frame.maxY
+    }
+
     func collectionView(_ collectionView: UICollectionView, itemsForBeginning session: UIDragSession, at indexPath: IndexPath) -> [UIDragItem] {
         let drag: SidebarDrag
         let provider: NSItemProvider
@@ -471,6 +516,11 @@ extension SidebarViewController: UICollectionViewDragDelegate, UICollectionViewD
         guard let box = session.localDragSession?.items.first?.localObject as? SidebarDragBox else {
             return UICollectionViewDropProposal(operation: .forbidden)
         }
+        if isOverFavorites(session) {
+            guard case .tab = box.drag else { return UICollectionViewDropProposal(operation: .forbidden) }
+            let intoTile = destination?.section == SidebarSection.favorites.rawValue
+            return UICollectionViewDropProposal(operation: .move, intent: intoTile ? .insertIntoDestinationIndexPath : .unspecified)
+        }
         guard let destination else { return UICollectionViewDropProposal(operation: .move, intent: .insertAtDestinationIndexPath) }
         switch SidebarSection(rawValue: destination.section) {
         case .favorites:
@@ -490,8 +540,8 @@ extension SidebarViewController: UICollectionViewDragDelegate, UICollectionViewD
         guard let box = coordinator.session.localDragSession?.items.first?.localObject as? SidebarDragBox else { return }
         let destination = coordinator.destinationIndexPath
         let section = destination.flatMap { SidebarSection(rawValue: $0.section) } ?? .tabs
-        if section == .favorites, case .tab(let id) = box.drag {
-            session.addFavorite(id)
+        if section == .favorites || isOverFavorites(coordinator.session) {
+            if case .tab(let id) = box.drag { session.addFavorite(id) }
             return
         }
         let index = section == .header ? 0 : (destination?.item ?? tabRows.count)

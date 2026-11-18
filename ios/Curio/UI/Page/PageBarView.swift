@@ -24,6 +24,8 @@ final class PageBarView: UIView, ThemeObserving {
 
     init() {
         super.init(frame: .zero)
+        backButton.accessibilityIdentifier = "browser.back"
+        forwardButton.accessibilityIdentifier = "browser.forward"
         let spacer = UIView()
         spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
         let gap = UIView()

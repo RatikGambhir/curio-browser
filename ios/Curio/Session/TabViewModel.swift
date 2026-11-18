@@ -4,6 +4,7 @@ import Foundation
 struct TabViewModel: Equatable {
     var id: UUID
     var title: String
+    var url: String
     var favicon: String?
     var active: Bool
     var pinned: Bool

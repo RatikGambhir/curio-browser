@@ -14,6 +14,7 @@ final class SidebarFooterView: UIView, ThemeObserving, UIDropInteractionDelegate
     init() {
         super.init(frame: .zero)
         libraryButton.setIcon(.library, label: "Library")
+        libraryButton.accessibilityIdentifier = "sidebar.library"
         dots.axis = .horizontal
         dots.spacing = 2
         dots.alignment = .center

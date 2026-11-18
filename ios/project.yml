@@ -54,6 +54,8 @@ targets:
         NSMicrophoneUsageDescription: Websites you visit can ask to use the microphone.
         NSLocationWhenInUseUsageDescription: Websites you visit can ask for your location.
         NSPhotoLibraryAddUsageDescription: Curio saves images you choose to your photo library.
+        NSPhotoLibraryUsageDescription: Curio reads the photos and videos you allow so you can browse them in Media.
+        PHPhotoLibraryPreventAutomaticLimitedAccessAlert: true
         NSLocalNetworkUsageDescription: Curio connects to AI servers and sites on your local network, such as Ollama.
     settings:
       base:
@@ -77,12 +79,26 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: app.curio.browser.tests
         GENERATE_INFOPLIST_FILE: YES
         SWIFT_DEFAULT_ACTOR_ISOLATION: nonisolated
+  CurioUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: CurioUITests
+    dependencies:
+      - target: Curio
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.curio.browser.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_DEFAULT_ACTOR_ISOLATION: nonisolated
 schemes:
   Curio:
     build:
       targets:
         Curio: all
         CurioTests: [test]
+        CurioUITests: [test]
     test:
       targets:
         - CurioTests
+        - CurioUITests

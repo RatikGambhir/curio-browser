@@ -10,10 +10,12 @@ Requirements: Xcode 26 or later. [XcodeGen](https://github.com/yonaskolb/XcodeGe
 open ios/Curio.xcodeproj
 ```
 
-Choose the **Curio** scheme and an iPhone or iPad simulator (or your device), then Run. To run the unit tests:
+Choose the **Curio** scheme and an iPhone or iPad simulator (or your device), then Run. The scheme runs unit, integration, snapshot, and UI tests:
 
 ```bash
-xcodebuild test -project ios/Curio.xcodeproj -scheme Curio -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
+xcodebuild test -project ios/Curio.xcodeproj -scheme Curio \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.2' \
+  -parallel-testing-enabled NO
 ```
 
 `project.yml` is the source of truth for the Xcode project. After adding or moving files, regenerate it:
@@ -21,6 +23,8 @@ xcodebuild test -project ios/Curio.xcodeproj -scheme Curio -destination 'platfor
 ```bash
 cd ios && xcodegen generate
 ```
+
+Use `-only-testing:CurioTests` or `-only-testing:CurioUITests` to run one target. UI tests load self-contained pages and use a fresh Debug storage directory per test. The compact browser bar snapshots use an iPhone 17 Pro simulator on iOS 26.2. When an intentional visual change fails a comparison, review the actual and expected images attached to the Xcode test result and replace the matching PNG in `CurioTests/Snapshots`.
 
 ## One app, every screen size
 
@@ -36,13 +40,15 @@ The layout follows the space the window has, not the device model, so it adapts 
 Everything from the desktop app, adapted for touch:
 
 - **Browsing** with WebKit (the same engine as the desktop app): back/forward swipes, reload, stop, zoom, print, find in page, downloads (saved to Files › Curio › Downloads), and Safari Web Inspector.
+- **Site icons** use the page’s declared favicon when available and try the site’s `/favicon.ico` before showing a letter tile.
 - **Command bar** for addresses, search, open tabs, history, bookmarks, commands and questions for the assistant. All six search engines plus custom URLs.
 - **Spaces** with their own name, icon, theme, tabs, pinned tabs and folders. Each space picks one of 20 gradient themes (10 light, 10 dark), and the theme decides whether that space's chrome is light or dark; web pages follow the Theme setting. The chrome cross-fades between themes when you switch spaces. Switch spaces with the footer dots or a horizontal swipe (or a two-finger trackpad swipe).
 - **Tabs**: vertical sidebar or horizontal strip, pinned tabs, global favorites, drag and drop to reorder, pin, group, favorite or move tabs, swipe a tab to close or pin it, reopen closed tabs, and tab sleeping to save memory.
 - **Folders**, Arc-style: make an empty one (⌥⌘N, or long-press empty sidebar space) or one from a tab (⌥⌘G), rename it in place (Return or tapping away saves, Escape cancels), collapse, recolor, reorder, ungroup, delete, and move to another space. New tabs open below a folder, never inside it. Tabs in a folder are saved like pinned tabs: closing one (⌘W, −, or swipe) unloads it and resets it to the page it was saved with, and **Delete Tab** sends it to Archived Tabs. Folders, their names, colors, collapsed state and tabs are kept across launches, even with session restore off.
 - **Split view** on iPad and large unfolded displays: show two to four tabs side by side or stacked (⌃⇧=, **Open in Split View** in a tab's menu, or drag a tab onto the left or right half of the page). Tap a pane to focus it, drag the gap to resize (double-tap for equal sizes), and long-press its sidebar row for Stack Panes, Equal Pane Sizes, Remove from Split View and Separate Split View (⌃⇧-). A split stays in its space and folder, moves as one, and is restored on launch. When the window gets too narrow, the focused tab is shown alone and the split comes back when there is room again; regular iPhones always show one page.
 - **Assistant**: streaming Markdown answers with copyable code blocks, chats about the current tab, chosen tabs or the whole space, selection actions (Explain, Summarize, Translate, Ask), quick actions, and saved chat history. Works with Anthropic, OpenAI and OpenAI-compatible servers. API keys are stored in the Keychain.
-- **Library** with Media, Downloads, Spaces and Archived Tabs (newest first, each with its space's dot, and searchable by space name) (plus Notes, Calendar, Clipboard History, Aliases and Inbox placeholders, as on desktop).
+- **Library** with Media, Downloads, Spaces and Archived Tabs, plus Notes, Calendar, Clipboard History, Aliases and Inbox placeholders. Archived Tabs keeps the newest 50 closed tabs across launches, even with session restore off. Search by title, URL or space name. Tabs from deleted spaces reopen in the active space.
+- **Media** browses images and videos in Curio’s Files folder, completed downloads, and the Photos library you grant access to. Tap a tile to preview it, or long-press to share, save to Files or copy it.
 - **Settings** for search, session restore, memory, theme, tab layout, AI providers (with a connection test), privacy and keyboard shortcuts.
 - **Keyboard and menu bar**: every desktop shortcut works with a hardware keyboard, the iPad menu bar shows Curio's menus, and shortcuts can be rebound in Settings.
 - Light and dark themes, Dynamic Type sizes, VoiceOver labels, and Reduce Motion.
@@ -62,7 +68,8 @@ ios/
 │   ├── UI/                Theme, components, window layout, sidebar, page, command bar,
 │   │                      assistant, library, settings, dialogs, commands and menus
 │   └── Resources/         Asset catalog (app icon, logo)
-└── CurioTests/            Unit tests for the core, AI and settings logic
+├── CurioTests/            Unit, integration and snapshot tests
+└── CurioUITests/          Browser flows driven through XCUITest
 ```
 
 `Core` and `AI` are direct ports of the Rust crates (`curio-core`, `curio-tabs`, `curio-spaces`, `curio-settings`, `curio-ai`), with the same behavior and the same tests. Settings and keybinding names match the desktop app.

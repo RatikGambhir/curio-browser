@@ -125,6 +125,7 @@ extension BrowserViewController {
         // The layout above already holds its final frames (the animator only
         // animates how they look), so the page area's room is known now.
         updateSplitRoom()
+        library.setVisible(libraryVisible)
     }
 
     // MARK: - Split view room
@@ -287,6 +288,7 @@ extension BrowserViewController {
         let sheetLibrary = LibraryViewController(session: session)
         sheetLibrary.presentedAsSheet = true
         sheetLibrary.delegate = self
+        sheetLibrary.select(library.section)
         let theme = ThemeCenter.shared.theme
         sheetLibrary.view.backgroundColor = theme.surface.uiColor
         sheetLibrary.modalPresentationStyle = isCompact ? .pageSheet : .formSheet

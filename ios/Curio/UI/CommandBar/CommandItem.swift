@@ -4,7 +4,7 @@ import Foundation
 struct CommandItem {
     enum Leading {
         case icon(Icon)
-        case site(favicon: String?, label: String)
+        case site(favicon: String?, pageURL: String?, label: String)
     }
 
     var key: String

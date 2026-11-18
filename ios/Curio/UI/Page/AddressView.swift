@@ -44,6 +44,7 @@ final class AddressView: TapControl, ThemeObserving {
         layer.cornerRadius = 7
         layer.cornerCurve = .continuous
         isAccessibilityElement = true
+        accessibilityIdentifier = "browser.address"
         accessibilityTraits = .button
         accessibilityHint = "Edits the address"
         HoverTracker(self) { [weak self] in
