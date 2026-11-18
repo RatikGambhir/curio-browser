@@ -1,7 +1,9 @@
 name: iOS CI
 
 on:
+  # Branch pushes are covered by pull_request; main still runs so CodeQL keeps a baseline.
   push:
+    branches: [main]
     paths:
       - 'ios/**'
       - '.github/workflows/ios.yml'
@@ -39,14 +41,59 @@ jobs:
           build-mode: manual
       - name: Build for CodeQL
         timeout-minutes: 15
+        env:
+          # Fire before the step timeout so the diagnostics make it into the log.
+          WATCHDOG_SECONDS: 720
         run: |
+          # When the traced build stalls, print what is running, sample the stuck
+          # compiler/extractor processes, and tail CodeQL's logs, then stop the build.
+          diagnose() {
+            echo "::group::Watchdog: Swift, CodeQL and build processes"
+            ps -axww -o pid,ppid,etime,%cpu,rss,state,command \
+              | grep -Ei 'swift|codeql|extractor|xcodebuild|xcbbuild' \
+              | grep -v grep | cut -c1-500
+            echo "::endgroup::"
+            for pid in $(pgrep -f 'swift-frontend|/swift/tools/' | head -n 4); do
+              echo "::group::Watchdog: stack sample of pid $pid"
+              ps -ww -o pid,etime,%cpu,state,command -p "$pid" | cut -c1-500
+              sample "$pid" 3 -mayDie -file "$RUNNER_TEMP/sample-$pid.txt" >/dev/null 2>&1
+              sed -n '1,120p' "$RUNNER_TEMP/sample-$pid.txt" 2>/dev/null
+              echo "::endgroup::"
+            done
+            echo "::group::Watchdog: newest CodeQL log files"
+            find "$RUNNER_TEMP/codeql_databases" -type f -path '*log*' -print0 2>/dev/null \
+              | xargs -0 ls -t 2>/dev/null | head -n 4 | while read -r log; do
+                echo "--- $log"
+                tail -n 60 "$log"
+              done
+            echo "::endgroup::"
+          }
+
           # CodeQL needs one architecture; generic simulator builds otherwise compile both.
-          # Disable Xcode features that can stall Swift tracing.
           xcodebuild build -project Curio.xcodeproj -scheme Curio \
             -configuration Debug -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath "$RUNNER_TEMP/Curio-CodeQL" \
             ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO \
-            SWIFT_ENABLE_EXPLICIT_MODULES=NO COMPILER_INDEX_STORE_ENABLE=NO
+            SWIFT_ENABLE_EXPLICIT_MODULES=NO COMPILER_INDEX_STORE_ENABLE=NO &
+          build_pid=$!
+
+          (
+            # Actions runs bash with -e; a grep with no matches must not end the watchdog.
+            set +e
+            # The sleep is killed when the build finishes first; leave quietly then.
+            sleep "$WATCHDOG_SECONDS" || exit 0
+            echo "::error::CodeQL build still running after ${WATCHDOG_SECONDS}s; collecting diagnostics."
+            diagnose
+            pkill -TERM -P "$build_pid" || true
+            kill -TERM "$build_pid" || true
+          ) &
+          watchdog_pid=$!
+
+          status=0
+          wait "$build_pid" || status=$?
+          pkill -P "$watchdog_pid" 2>/dev/null || true
+          kill "$watchdog_pid" 2>/dev/null || true
+          exit "$status"
       - uses: github/codeql-action/analyze@v4
         with:
           category: /language:swift

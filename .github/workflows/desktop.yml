@@ -1,7 +1,9 @@
 name: Desktop CI
 
 on:
+  # Branch pushes are covered by pull_request; main still runs so CodeQL keeps a baseline.
   push:
+    branches: [main]
     paths:
       - 'browser/**'
       - '.github/workflows/desktop.yml'
