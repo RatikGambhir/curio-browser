@@ -25,7 +25,7 @@ jobs:
   codeql:
     name: iOS / CodeQL
     runs-on: macos-26
-    timeout-minutes: 25
+    timeout-minutes: 60
     permissions:
       contents: read
       security-events: write
@@ -39,8 +39,11 @@ jobs:
           build-mode: manual
       - name: Build for CodeQL
         run: |
+          # CodeQL needs one architecture; generic simulator builds otherwise compile both.
           xcodebuild build -project Curio.xcodeproj -scheme Curio \
-            -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO
+            -configuration Debug -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/Curio-CodeQL" \
+            ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO
       - uses: github/codeql-action/analyze@v4
         with:
           category: /language:swift
