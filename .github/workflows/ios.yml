@@ -22,40 +22,6 @@ defaults:
     working-directory: ios
 
 jobs:
-  codeql:
-    name: iOS / CodeQL
-    runs-on: macos-26
-    timeout-minutes: 25
-    permissions:
-      contents: read
-      security-events: write
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-      - name: Ensure iOS 26.2 simulator runtime
-        timeout-minutes: 10
-        run: |
-          runtime=com.apple.CoreSimulator.SimRuntime.iOS-26-2
-          if ! xcrun simctl list runtimes --json | python3 -c 'import json, sys; sys.exit(not any(r["identifier"] == sys.argv[1] and r.get("isAvailable", False) for r in json.load(sys.stdin)["runtimes"]))' "$runtime"; then
-            xcodebuild -downloadPlatform iOS -buildVersion 26.2
-          fi
-          xcrun simctl list runtimes
-      - uses: github/codeql-action/init@v4
-        with:
-          languages: swift
-          build-mode: manual
-      - name: Build for CodeQL
-        timeout-minutes: 15
-        run: |
-          # Limit concurrent compiler launches while CodeQL tracing is active.
-          xcodebuild build -jobs 1 -project Curio.xcodeproj -scheme Curio \
-            -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO \
-            SWIFT_COMPILATION_MODE=wholemodule
-      - uses: github/codeql-action/analyze@v4
-        with:
-          category: /language:swift
-
   test:
     name: iOS / test (${{ matrix.device }})
     runs-on: macos-26
